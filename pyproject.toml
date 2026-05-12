@@ -44,5 +44,8 @@ target-version = "py314"
 select = ["E", "F", "I", "N", "UP", "ANN", "S", "B", "A", "C4", "DTZ", "T10", "EM", "ISC", "ICN", "PIE", "PT", "Q", "RET", "SIM", "TID", "ARG", "PTH", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
 ignore = ["ANN101", "ANN102", "ANN401"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "ANN", "PLC0415"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
