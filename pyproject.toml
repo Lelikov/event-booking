@@ -1,0 +1,48 @@
+[project]
+name = "event-booking"
+version = "0.1.0"
+description = "Booking orchestration service: constraints, chat, meeting URLs"
+requires-python = ">=3.14"
+dependencies = [
+    "cloudevents>=2.0.0",
+    "cryptography>=46.0.1",
+    "dishka>=1.8.0",
+    "event-schemas @ file:///Users/alexandrlelikov/PycharmProjects/events/event-schemas",
+    "fastapi>=0.135.1",
+    "faststream[rabbit]>=0.6.7",
+    "httpx>=0.28.0",
+    "pydantic-settings>=2.13.1",
+    "pyjwt>=2.10.1",
+    "sqlalchemy[asyncio]>=2.0.48",
+    "asyncpg>=0.31.0",
+    "stream-chat>=4.29.0",
+    "structlog>=25.5.0",
+    "uvicorn>=0.41.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "polyfactory>=2.18.1",
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.3",
+    "ruff>=0.9.3",
+    "pre-commit>=4.5.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "ANN", "S", "B", "A", "C4", "DTZ", "T10", "EM", "ISC", "ICN", "PIE", "PT", "Q", "RET", "SIM", "TID", "ARG", "PTH", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
+ignore = ["ANN101", "ANN102", "ANN401"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
