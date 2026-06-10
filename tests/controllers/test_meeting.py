@@ -7,7 +7,7 @@ import pytest
 from event_schemas.types import EventType
 
 from event_booking.controllers.meeting import MeetingController
-from event_booking.dtos import BookingDTO
+from event_booking.dtos import BookingDTO, UserDTO
 
 JITSI_SECRET = "test-secret"
 JITSI_AUD = "test-aud"
@@ -26,6 +26,13 @@ def booking():
         status="accepted",
         title="Test Meeting",
         uid="booking-uid-123",
+        user=UserDTO(
+            id=1,
+            name="Test User",
+            email="user@test.com",
+            locked=False,
+            time_zone="UTC",
+        ),
     )
 
 
@@ -72,7 +79,6 @@ def controller(mock_shortener, mock_chat_client, mock_db, mock_events):
 async def test_returns_shortened_url(controller, booking, mock_shortener):
     url = await controller.create_meeting_url(
         booking=booking,
-        participant_id="user-1",
         participant_name="Test User",
         participant_email="user@test.com",
     )
@@ -86,7 +92,6 @@ async def test_falls_back_to_long_url(controller, booking, mock_shortener):
 
     url = await controller.create_meeting_url(
         booking=booking,
-        participant_id="user-1",
         participant_name="Test User",
         participant_email="user@test.com",
     )
@@ -98,7 +103,6 @@ async def test_falls_back_to_long_url(controller, booking, mock_shortener):
 async def test_sends_meeting_url_created_event(controller, booking, mock_events):
     await controller.create_meeting_url(
         booking=booking,
-        participant_id="user-1",
         participant_name="Test User",
         participant_email="user@test.com",
     )
@@ -107,6 +111,11 @@ async def test_sends_meeting_url_created_event(controller, booking, mock_events)
     call_kwargs = mock_events.send_event.call_args.kwargs
     assert call_kwargs["event"] == EventType.MEETING_URL_CREATED
     assert call_kwargs["booking_uid"] == booking.uid
+    assert call_kwargs["data"] == {
+        "email": "user@test.com",
+        "recipient_role": "organizer",
+        "meeting_url": "https://short.test/abc",
+    }
 
 
 async def test_deletes_and_sends_event(controller, booking, mock_shortener, mock_events):
@@ -117,3 +126,4 @@ async def test_deletes_and_sends_event(controller, booking, mock_shortener, mock
     call_kwargs = mock_events.send_event.call_args.kwargs
     assert call_kwargs["event"] == EventType.MEETING_URL_DELETED
     assert call_kwargs["booking_uid"] == booking.uid
+    assert call_kwargs["data"] == {"email": "user@test.com", "recipient_role": "organizer"}

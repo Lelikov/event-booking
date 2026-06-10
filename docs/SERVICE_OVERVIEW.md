@@ -12,7 +12,7 @@ Booking orchestration and enrichment service. Consumes booking lifecycle events 
 
 ```
 RabbitMQ topic exchange ("events")
-  queue: events.booking.lifecycle
+  queue: events.booking.lifecycle.booking (own queue; event-saver has events.booking.lifecycle.saver)
   binding key: events.booking.lifecycle
         |
         v
@@ -44,7 +44,7 @@ ReminderScheduler                         (scheduler.py)
 
 ## Responsibilities
 
-- Consume booking lifecycle events from RabbitMQ (`events.booking.lifecycle` queue)
+- Consume booking lifecycle events from RabbitMQ (`events.booking.lifecycle.booking` queue, bound to routing key `events.booking.lifecycle`)
 - Validate bookings against organizational constraints (when enabled)
 - Reject bookings that violate constraints; publish `booking.rejected` events
 - Create GetStream chat channels for accepted bookings (one channel per booking)

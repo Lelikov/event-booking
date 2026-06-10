@@ -5,8 +5,11 @@ import json
 import structlog
 from cloudevents.core.bindings.http import HTTPMessage, from_http
 from cloudevents.core.formats.json import JSONFormat
+from event_schemas.attributes import BOOKING_ID_ATTRIBUTE
+from event_schemas.envelope import unwrap_payload
+from event_schemas.queues import EVENTS_DLX, QueueSpec
 from event_schemas.types import EventType
-from faststream.rabbit import RabbitBroker, RabbitExchange, RabbitMessage, RabbitQueue
+from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange, RabbitMessage, RabbitQueue
 
 from event_booking.controllers.booking import BookingController
 
@@ -49,15 +52,13 @@ class BookingConsumer:
 
         logger.warning("Unknown event type received, ignoring", event_type=event_type, booking_uid=booking_uid)
 
-    def register(self, broker: RabbitBroker, exchange: RabbitExchange, queue_name: str) -> None:
-        """Create queue and register subscriber on the broker."""
+    def register(self, broker: RabbitBroker, exchange: RabbitExchange, queue_spec: QueueSpec) -> None:
+        """Create the canonical per-consumer queue and register subscriber on the broker."""
         queue = RabbitQueue(
-            name=queue_name,
+            name=queue_spec.name,
             durable=True,
-            arguments={
-                "x-max-priority": 10,
-                "x-dead-letter-exchange": f"{queue_name}.dlq",
-            },
+            routing_key=str(queue_spec.binding),
+            arguments=queue_spec.arguments,
         )
 
         @broker.subscriber(queue, exchange)
@@ -73,13 +74,11 @@ class BookingConsumer:
                 return
 
             event_type: str = cloud_event.get_attributes().get("type", "")
-            booking_uid: str = (
-                cloud_event.get_attributes().get("bookingid") or cloud_event.get_attributes().get("booking_id") or ""
-            )
+            booking_uid: str = cloud_event.get_attributes().get(BOOKING_ID_ATTRIBUTE) or ""
             raw_data = cloud_event.data
             if isinstance(raw_data, bytes):
                 raw_data = json.loads(raw_data)
-            data: dict = raw_data if isinstance(raw_data, dict) else {}
+            data: dict = unwrap_payload(raw_data if isinstance(raw_data, dict) else None)
 
             if event_type not in HANDLED_EVENTS:
                 logger.warning("Unhandled event type, skipping", event_type=event_type)
@@ -87,3 +86,18 @@ class BookingConsumer:
 
             logger.info("Dispatching event", event_type=event_type, booking_uid=booking_uid)
             await self.dispatch(event_type, booking_uid, data)
+
+
+async def ensure_dead_letter_topology(broker: RabbitBroker, queue_spec: QueueSpec) -> None:
+    """Idempotently declare the DLX and this consumer's DLQ (no startup-order dependency)."""
+    dlx = RabbitExchange(name=EVENTS_DLX, type=ExchangeType.TOPIC, durable=True)
+    declared_dlx = await broker.declare_exchange(dlx)
+    dlq = RabbitQueue(
+        name=queue_spec.dlq_name,
+        durable=True,
+        routing_key=queue_spec.dlq_name,
+        arguments=queue_spec.dlq_arguments,
+    )
+    declared_dlq = await broker.declare_queue(dlq)
+    await declared_dlq.bind(exchange=declared_dlx, routing_key=queue_spec.dlq_name)
+    logger.info("Dead-letter topology ensured", dlx=EVENTS_DLX, dlq=queue_spec.dlq_name)

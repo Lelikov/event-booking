@@ -6,11 +6,10 @@ from event_booking.dtos import BookingDTO
 
 
 class IMeetingController(Protocol):
-    async def create_meeting_url(  # noqa: PLR0913
+    async def create_meeting_url(
         self,
         *,
         booking: BookingDTO,
-        participant_id: str,
         participant_name: str,
         participant_email: str,
         is_update_url_data: bool = False,

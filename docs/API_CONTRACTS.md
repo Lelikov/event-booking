@@ -29,7 +29,7 @@ Host: localhost:8000
 
 | Property | Value |
 |----------|-------|
-| Queue name | `events.booking.lifecycle` |
+| Queue name | `events.booking.lifecycle.booking` (per-consumer, from `event_schemas.queues`) |
 | Exchange | `events` (topic) |
 | Routing key | `events.booking.lifecycle` |
 | Durable | yes |
@@ -53,7 +53,7 @@ Messages arrive as binary-mode CloudEvents per the CloudEvents 1.0 specification
 | `ce-id` | `"uuid-string"` | Unique event identifier | Logging, idempotency (future) |
 | `ce-time` | `2026-05-13T12:00:00Z` | Event creation timestamp | Logging |
 | `ce-source` | `"event-receiver"` | Source service | Logging |
-| `ce-booking_id` | `"booking-uid"` | Booking identifier | Extracted to dispatch |
+| `ce-bookingid` | `"booking-uid"` | Booking identifier (canonical, no underscore) | Extracted to dispatch |
 
 **Typical parsed payload (body):**
 ```json
@@ -107,7 +107,7 @@ with `source: "booking"` and appropriate `type` and `data` fields.
 }
 ```
 
-**Destination:** Routed by event-receiver to `events.booking.lifecycle` queue.
+**Destination:** Routed by event-receiver with routing key `events.booking.lifecycle` (fan-out to `.saver` / `.booking` queues).
 **Consumers:** event-saver (audit), event-notifier (via routing rules).
 
 Reference: `controllers/booking.py:54-60`
@@ -240,7 +240,7 @@ Reference: `controllers/booking.py:135-145`
 }
 ```
 
-**Destination:** Routed by event-receiver to `events.booking.lifecycle` queue.
+**Destination:** Routed by event-receiver with routing key `events.booking.lifecycle` (fan-out to `.saver` / `.booking` queues).
 **Consumers:** event-saver (audit), event-notifier (sends reminder messages).
 
 Reference: `scheduler.py:30-80`

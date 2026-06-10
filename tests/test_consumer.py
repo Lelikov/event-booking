@@ -52,3 +52,46 @@ class TestDispatch:
         ctrl.handle_cancelled.assert_not_awaited()
         ctrl.handle_rescheduled.assert_not_awaited()
         ctrl.handle_reassigned.assert_not_awaited()
+
+
+class TestRegisterContract:
+    def test_uses_canonical_per_consumer_queue_spec(self) -> None:
+        from event_schemas.queues import BOOKING_LIFECYCLE_BOOKING_QUEUE, RoutingKey
+
+        assert BOOKING_LIFECYCLE_BOOKING_QUEUE.name == "events.booking.lifecycle.booking"
+        assert BOOKING_LIFECYCLE_BOOKING_QUEUE.binding == RoutingKey.BOOKING_LIFECYCLE
+        assert BOOKING_LIFECYCLE_BOOKING_QUEUE.arguments == {
+            "x-max-priority": 10,
+            "x-dead-letter-exchange": "events.dlx",
+            "x-dead-letter-routing-key": "events.booking.lifecycle.booking.dlq",
+        }
+
+    def test_register_declares_queue_with_spec(self) -> None:
+        from unittest.mock import MagicMock
+
+        from event_schemas.queues import BOOKING_LIFECYCLE_BOOKING_QUEUE
+
+        consumer, _ = make_consumer()
+        broker = MagicMock()
+        exchange = MagicMock()
+
+        consumer.register(broker, exchange, BOOKING_LIFECYCLE_BOOKING_QUEUE)
+
+        broker.subscriber.assert_called_once()
+        queue = broker.subscriber.call_args.args[0]
+        assert queue.name == BOOKING_LIFECYCLE_BOOKING_QUEUE.name
+        assert queue.routing_key == str(BOOKING_LIFECYCLE_BOOKING_QUEUE.binding)
+        # FastStream adds x-queue-type=classic; canonical args must be a subset verbatim
+        assert BOOKING_LIFECYCLE_BOOKING_QUEUE.arguments.items() <= queue.arguments.items()
+
+
+class TestEnvelopeUnwrap:
+    def test_unwrap_payload_extracts_original_for_dispatch(self) -> None:
+        from event_schemas.envelope import unwrap_payload
+
+        data = {
+            "original": {"cancellation_reason": "Client request"},
+            "normalized": {"participants": [{"email": "cli@example.com", "role": "client"}]},
+        }
+
+        assert unwrap_payload(data) == {"cancellation_reason": "Client request"}

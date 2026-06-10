@@ -88,10 +88,9 @@ class MeetingController:
         )
         return f"{self._meeting_host_url}/{booking.uid}?jwt_video={jwt_video}&jwt_chat={jwt_chat}"
 
-    async def create_meeting_url(  # noqa: PLR0913
+    async def create_meeting_url(
         self,
         booking: BookingDTO,
-        participant_id: str,
         participant_name: str,
         participant_email: str,
         is_update_url_data: bool = False,
@@ -119,12 +118,14 @@ class MeetingController:
         else:
             short_url = await self._shortener.create_url(long_url, expires_at, not_before, external_id)
 
+        # Canonical MeetingUrlCreatedPayload: {email, recipient_role, meeting_url}
         await self._events.send_event(
             booking_uid=booking.uid,
             event=EventType.MEETING_URL_CREATED,
             data={
-                "participant_id": participant_id,
-                "url": short_url or long_url,
+                "email": participant_email,
+                "recipient_role": role,
+                "meeting_url": short_url or long_url,
             },
         )
 
@@ -133,8 +134,20 @@ class MeetingController:
     async def delete_meeting_url(self, booking: BookingDTO, external_id_prefix: str = "") -> None:
         external_id = f"{external_id_prefix}{booking.uid}" if external_id_prefix else booking.uid
         await self._shortener.delete_url(external_id=external_id)
+
+        role = "client" if external_id_prefix else "organizer"
+        participant = booking.client if external_id_prefix else booking.user
+        if not participant:
+            logger.warning(
+                "meeting.url_deleted not published: participant missing",
+                booking_uid=booking.uid,
+                recipient_role=role,
+            )
+            return
+
+        # Canonical MeetingUrlDeletedPayload: {email, recipient_role}
         await self._events.send_event(
             booking_uid=booking.uid,
             event=EventType.MEETING_URL_DELETED,
-            data={"external_id": external_id},
+            data={"email": participant.email, "recipient_role": role},
         )

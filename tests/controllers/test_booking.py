@@ -105,6 +105,13 @@ class TestHandleCreated:
         from event_schemas.types import EventType
 
         assert event_kwargs["event"] == EventType.BOOKING_REJECTED
+        booking_client_email = booking.client.email
+        assert event_kwargs["data"] == {
+            "client_email": booking_client_email,
+            "rejection_type": None,
+            "rejection_reasons": ["Active future booking already exists"],
+            "has_active_booking": False,
+        }
 
         mock_chat_controller.create_chat.assert_not_called()
         mock_meeting_controller.create_meeting_url.assert_not_called()

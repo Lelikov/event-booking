@@ -55,7 +55,7 @@ class BookingController:
                 await self._events.send_event(
                     booking_uid=booking.uid,
                     event=EventType.BOOKING_REJECTED,
-                    data={"rejection_reasons": result.rejection_reasons},
+                    data=self._build_rejected_payload(booking, result),
                 )
                 return
 
@@ -149,7 +149,6 @@ class BookingController:
         if booking.user:
             organizer_url = await self._meeting.create_meeting_url(
                 booking=booking,
-                participant_id=str(booking.user.id),
                 participant_name=booking.user.name,
                 participant_email=booking.user.email,
                 is_update_url_data=is_update_url_data,
@@ -159,7 +158,6 @@ class BookingController:
         if booking.client:
             await self._meeting.create_meeting_url(
                 booking=booking,
-                participant_id=booking.client.email,
                 participant_name=booking.client.name,
                 participant_email=booking.client.email,
                 is_update_url_data=is_update_url_data,
@@ -187,6 +185,21 @@ class BookingController:
             recipients=recipients,
             template_data=template_data,
         )
+
+    @staticmethod
+    def _build_rejected_payload(booking: BookingDTO, result: ConstraintsResult) -> dict:
+        """Build the canonical BookingRejectedPayload dict for booking.rejected."""
+        payload: dict = {
+            "client_email": booking.client.email if booking.client else "",
+            "rejection_type": result.rejection_type,
+            "rejection_reasons": result.rejection_reasons,
+            "has_active_booking": result.has_active_booking,
+        }
+        if result.available_from is not None:
+            payload["available_from"] = result.available_from.isoformat()
+        if result.active_booking_start is not None:
+            payload["active_booking_start"] = result.active_booking_start.isoformat()
+        return payload
 
     async def _send_rejection_notification(self, booking: BookingDTO, result: ConstraintsResult) -> None:
         """Send rejection notification command with constraint details."""

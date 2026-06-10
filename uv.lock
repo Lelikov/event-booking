@@ -461,6 +461,12 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.31.0" },
@@ -485,9 +491,15 @@ requires-dist = [
 ]
 provides-extras = ["dev"]
 
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+]
+
 [[package]]
 name = "event-schemas"
-version = "0.1.5"
+version = "0.2.0"
 source = { directory = "../event-schemas" }
 dependencies = [
     { name = "pydantic", extra = ["email"] },
@@ -502,7 +514,10 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "code-review-graph", specifier = ">=2.3.1" }]
+dev = [
+    { name = "code-review-graph", specifier = ">=2.3.1" },
+    { name = "pytest", specifier = ">=8.0" },
+]
 
 [[package]]
 name = "faker"

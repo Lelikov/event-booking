@@ -18,10 +18,9 @@ class Settings(BaseSettings):
     # Cal.com PostgreSQL
     calcom_postgres_dsn: PostgresDsn = Field(strict=True)
 
-    # RabbitMQ
+    # RabbitMQ (queue name/args come from event_schemas.queues.BOOKING_LIFECYCLE_BOOKING_QUEUE)
     rabbit_url: AmqpDsn = "amqp://guest:guest@localhost:5672/"
     rabbit_exchange: str = "events"
-    booking_lifecycle_queue: str = "events.booking.lifecycle"
 
     # event-receiver (publish events)
     events_endpoint_url: str | None = None
