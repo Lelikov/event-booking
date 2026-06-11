@@ -2,7 +2,7 @@
 
 ## audit-v2 (2026-06-11)
 
-Full audit of the service; all findings fixed on branch `feat/event-booking-service`
+Full audit of the service; all findings fixed (history extracted from the monorepo root branch `feat/event-booking-service` into this standalone repo)
 unless marked otherwise. Cross-references: `../../docs/audit/v2/findings/event-booking.json`,
 `../../docs/audit/v2/fixes/event-booking.json`, `../../docs/audit/v2/CONTRACT_DECISIONS.md`.
 
