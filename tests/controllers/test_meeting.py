@@ -48,7 +48,7 @@ def mock_shortener():
 @pytest.fixture
 def mock_chat_client():
     client = MagicMock()
-    client.create_token.return_value = "chat-jwt-token"
+    client.create_token = AsyncMock(return_value="chat-jwt-token")
     return client
 
 

@@ -72,7 +72,7 @@ class MeetingController:
         }
         return jwt.encode(payload, self._jitsi_jwt_secret, algorithm="HS256")
 
-    def _generate_long_url(
+    async def _generate_long_url(
         self,
         booking: BookingDTO,
         participant_name: str,
@@ -81,7 +81,7 @@ class MeetingController:
     ) -> str:
         jwt_video = self._create_jitsi_token(booking, participant_name, participant_email, role)
         expires_at = int(self._get_expiration(booking.end_time))
-        jwt_chat = self._chat_client.create_token(
+        jwt_chat = await self._chat_client.create_token(
             user_id=participant_email,
             name=participant_name,
             expires_at=expires_at,
@@ -97,7 +97,7 @@ class MeetingController:
         external_id_prefix: str = "",
     ) -> str:
         role = "client" if external_id_prefix else "organizer"
-        long_url = self._generate_long_url(booking, participant_name, participant_email, role)
+        long_url = await self._generate_long_url(booking, participant_name, participant_email, role)
 
         not_before = self._get_not_before(booking.start_time)
         expires_at = self._get_expiration(booking.end_time)
