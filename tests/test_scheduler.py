@@ -3,12 +3,13 @@
 from unittest.mock import AsyncMock
 
 from event_booking.scheduler import ReminderScheduler
+from tests.conftest import FakeContainer
 from tests.factories import make_booking
 
 
 def make_scheduler(db: AsyncMock, events: AsyncMock) -> ReminderScheduler:
     return ReminderScheduler(
-        db=db,
+        container=FakeContainer(db),
         events=events,
         interval_seconds=300,
         shift_from_minutes=55,

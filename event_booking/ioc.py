@@ -1,13 +1,17 @@
-"""Dishka dependency injection container for event-booking service."""
+"""Dishka dependency injection container for event-booking service.
 
-# TODO: BookingController and BookingDatabaseAdapter require an AsyncSession per
-# message/request. Currently everything is wired at APP scope for simplicity.
-# Per-message session management must be implemented before production use:
-# each incoming RabbitMQ message should open its own session, use it, and commit/close it.
+Scope layout:
+- APP: settings, engine, sessionmaker, broker, HTTP publisher, GetStream/shortener
+  adapters and the stateless controllers built on them.
+- REQUEST: AsyncSession and everything that touches it (SqlExecutor, db adapter,
+  MeetingController, BookingController). The consumer opens one REQUEST scope per
+  RabbitMQ message; the scheduler opens one per poll tick. Sessions are never
+  shared across concurrent work units.
+"""
 
 from collections.abc import AsyncIterator
 
-from dishka import Provider, Scope, provide
+from dishka import AsyncContainer, Provider, Scope, provide
 from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
@@ -22,14 +26,19 @@ from event_booking.controllers.booking import BookingController
 from event_booking.controllers.chat import ChatController
 from event_booking.controllers.constraints import analyze_on_create
 from event_booking.controllers.meeting import MeetingController
+from event_booking.dtos import AttendeeBookingDTO, BookingDTO, ConstraintsResult
 from event_booking.interfaces.constraints import IBookingConstraintsAnalyzer
 from event_booking.scheduler import ReminderScheduler
+
+BROKER_GRACEFUL_TIMEOUT_SECONDS = 30.0
 
 
 class _ConstraintsAnalyzerAdapter:
     """Wraps the module-level analyze_on_create function behind the Protocol interface."""
 
-    def analyze_on_create(self, *, booking, attendee_bookings):  # noqa: ANN001, ANN202
+    def analyze_on_create(
+        self, *, booking: BookingDTO, attendee_bookings: list[AttendeeBookingDTO]
+    ) -> ConstraintsResult:
         return analyze_on_create(booking=booking, attendee_bookings=attendee_bookings)
 
 
@@ -50,22 +59,22 @@ class AppProvider(Provider):
     def get_sessionmaker(self, engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
         return async_sessionmaker(engine, expire_on_commit=False)
 
-    @provide
+    @provide(scope=Scope.REQUEST)
     async def get_session(self, factory: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncSession]:
         async with factory() as session:
             yield session
 
-    @provide
+    @provide(scope=Scope.REQUEST)
     def get_sql_executor(self, session: AsyncSession) -> SqlExecutor:
         return SqlExecutor(session)
 
-    @provide
+    @provide(scope=Scope.REQUEST)
     def get_db_adapter(self, executor: SqlExecutor) -> BookingDatabaseAdapter:
         return BookingDatabaseAdapter(executor)
 
     @provide
     def get_rabbit_broker(self, settings: Settings) -> RabbitBroker:
-        return RabbitBroker(str(settings.rabbit_url))
+        return RabbitBroker(str(settings.rabbit_url), graceful_timeout=BROKER_GRACEFUL_TIMEOUT_SECONDS)
 
     @provide
     def get_rabbit_exchange(self, settings: Settings) -> RabbitExchange:
@@ -100,7 +109,7 @@ class AppProvider(Provider):
     def get_constraints_analyzer(self) -> IBookingConstraintsAnalyzer:
         return _ConstraintsAnalyzerAdapter()  # type: ignore[return-value]
 
-    @provide
+    @provide(scope=Scope.REQUEST)
     def get_meeting_controller(
         self,
         shortener: UrlShortenerAdapter,
@@ -120,7 +129,7 @@ class AppProvider(Provider):
             meeting_host_url=settings.meeting_host_url,
         )
 
-    @provide
+    @provide(scope=Scope.REQUEST)
     def get_booking_controller(  # noqa: PLR0913
         self,
         db: BookingDatabaseAdapter,
@@ -140,18 +149,18 @@ class AppProvider(Provider):
         )
 
     @provide
-    def get_booking_consumer(self, booking_controller: BookingController) -> BookingConsumer:
-        return BookingConsumer(booking_controller)
+    def get_booking_consumer(self, container: AsyncContainer) -> BookingConsumer:
+        return BookingConsumer(container)
 
     @provide
     def get_reminder_scheduler(
         self,
-        db: BookingDatabaseAdapter,
+        container: AsyncContainer,
         events: EventPublisher,
         settings: Settings,
     ) -> ReminderScheduler:
         return ReminderScheduler(
-            db=db,
+            container=container,
             events=events,
             interval_seconds=settings.reminder_interval_seconds,
             shift_from_minutes=settings.reminder_shift_from_minutes,

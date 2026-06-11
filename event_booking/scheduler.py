@@ -4,9 +4,10 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from dishka import AsyncContainer
 from event_schemas.types import TriggerEvent
 
-from event_booking.interfaces.db import IBookingDatabaseAdapter
+from event_booking.adapters.db import BookingDatabaseAdapter
 from event_booking.interfaces.events import IEventPublisher
 
 logger = structlog.get_logger(__name__)
@@ -16,13 +17,13 @@ class ReminderScheduler:
     def __init__(
         self,
         *,
-        db: IBookingDatabaseAdapter,
+        container: AsyncContainer,
         events: IEventPublisher,
         interval_seconds: int,
         shift_from_minutes: int,
         shift_to_minutes: int,
     ) -> None:
-        self._db = db
+        self._container = container
         self._events = events
         self._interval_seconds = interval_seconds
         self._shift_from_minutes = shift_from_minutes
@@ -30,12 +31,21 @@ class ReminderScheduler:
         self._running = False
 
     async def send_reminders(self) -> int:
-        """Query upcoming bookings and publish a notification.send_requested for each."""
+        """Query upcoming bookings and publish a notification.send_requested for each.
+
+        Opens its own REQUEST scope so the scheduler never shares an AsyncSession
+        with concurrently processed RabbitMQ messages.
+        """
+        async with self._container() as request_container:
+            db = await request_container.get(BookingDatabaseAdapter)
+            return await self._send_reminders(db)
+
+    async def _send_reminders(self, db: BookingDatabaseAdapter) -> int:
         now = datetime.now(UTC)
         start_from = now + timedelta(minutes=self._shift_from_minutes)
         start_to = now + timedelta(minutes=self._shift_to_minutes)
 
-        bookings = await self._db.get_bookings(start_time_from=start_from, start_time_to=start_to)
+        bookings = await db.get_bookings(start_time_from=start_from, start_time_to=start_to)
         count = 0
         for booking in bookings:
             recipients = []

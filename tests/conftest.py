@@ -7,6 +7,27 @@ import pytest
 from event_booking.dtos import ConstraintsResult
 
 
+class FakeContainer:
+    """Minimal stand-in for dishka AsyncContainer: every get() returns the same object."""
+
+    def __init__(self, resolved: object) -> None:
+        self._resolved = resolved
+        self.entered_scopes = 0
+
+    def __call__(self) -> FakeContainer:
+        return self
+
+    async def __aenter__(self) -> FakeContainer:
+        self.entered_scopes += 1
+        return self
+
+    async def __aexit__(self, *args: object) -> bool:
+        return False
+
+    async def get(self, _dependency: type) -> object:
+        return self._resolved
+
+
 @pytest.fixture
 def mock_db() -> AsyncMock:
     return AsyncMock()

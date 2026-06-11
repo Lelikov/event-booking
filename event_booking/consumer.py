@@ -5,6 +5,7 @@ import json
 import structlog
 from cloudevents.core.bindings.http import HTTPMessage, from_http
 from cloudevents.core.formats.json import JSONFormat
+from dishka import AsyncContainer
 from event_schemas.attributes import BOOKING_ID_ATTRIBUTE
 from event_schemas.envelope import unwrap_payload
 from event_schemas.queues import EVENTS_DLX, QueueSpec
@@ -26,28 +27,29 @@ HANDLED_EVENTS: frozenset[str] = frozenset(
 
 
 class BookingConsumer:
-    def __init__(self, booking_controller: BookingController) -> None:
-        self._controller = booking_controller
+    def __init__(self, container: AsyncContainer) -> None:
+        self._container = container
 
-    async def dispatch(self, event_type: str, booking_uid: str, data: dict) -> None:
+    @staticmethod
+    async def dispatch(controller: BookingController, event_type: str, booking_uid: str, data: dict) -> None:
         """Route event_type to the appropriate BookingController handler."""
         if event_type == EventType.BOOKING_CREATED.value:
-            await self._controller.handle_created(booking_uid)
+            await controller.handle_created(booking_uid)
             return
 
         if event_type == EventType.BOOKING_RESCHEDULED.value:
             previous_start_time = data.get("previous_start_time")
-            await self._controller.handle_rescheduled(booking_uid, previous_start_time=previous_start_time)
+            await controller.handle_rescheduled(booking_uid, previous_start_time=previous_start_time)
             return
 
         if event_type == EventType.BOOKING_REASSIGNED.value:
             previous_organizer_email = data.get("previous_organizer_email")
-            await self._controller.handle_reassigned(booking_uid, previous_organizer_email=previous_organizer_email)
+            await controller.handle_reassigned(booking_uid, previous_organizer_email=previous_organizer_email)
             return
 
         if event_type == EventType.BOOKING_CANCELLED.value:
             cancellation_reason = data.get("cancellation_reason")
-            await self._controller.handle_cancelled(booking_uid, cancellation_reason=cancellation_reason)
+            await controller.handle_cancelled(booking_uid, cancellation_reason=cancellation_reason)
             return
 
         logger.warning("Unknown event type received, ignoring", event_type=event_type, booking_uid=booking_uid)
@@ -85,7 +87,9 @@ class BookingConsumer:
                 return
 
             logger.info("Dispatching event", event_type=event_type, booking_uid=booking_uid)
-            await self.dispatch(event_type, booking_uid, data)
+            async with self._container() as request_container:
+                controller = await request_container.get(BookingController)
+                await self.dispatch(controller, event_type, booking_uid, data)
 
 
 async def ensure_dead_letter_topology(broker: RabbitBroker, queue_spec: QueueSpec) -> None:

@@ -18,10 +18,18 @@ class SqlExecutor:
         return list(result.mappings().all())
 
     async def execute(self, query: str, values: dict) -> None:
-        await self.session.execute(text(query), values)
-        await self.session.commit()
+        try:
+            await self.session.execute(text(query), values)
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            raise
 
     async def execute_in_transaction(self, statements: list[tuple[str, dict]]) -> None:
-        for query, values in statements:
-            await self.session.execute(text(query), values)
-        await self.session.commit()
+        try:
+            for query, values in statements:
+                await self.session.execute(text(query), values)
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            raise
