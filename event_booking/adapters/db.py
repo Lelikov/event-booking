@@ -97,13 +97,15 @@ _GET_ATTENDEE_BOOKINGS_SQL = """
 
 _UPDATE_VIDEO_URL_SQL = """
     UPDATE "Booking"
-    SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('videoCallUrl', :url)
+    SET metadata = COALESCE(metadata, '{}'::jsonb)
+        || jsonb_build_object('videoCallUrl', CAST(:url AS TEXT))
     WHERE uid = :uid
 """
 
 _MARK_REMINDER_SENT_SQL = """
     UPDATE "Booking"
-    SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(:reminder_marker_key, :sent_at)
+    SET metadata = COALESCE(metadata, '{}'::jsonb)
+        || jsonb_build_object(CAST(:reminder_marker_key AS TEXT), CAST(:sent_at AS TEXT))
     WHERE uid = :uid
 """
 

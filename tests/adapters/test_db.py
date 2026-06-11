@@ -234,3 +234,21 @@ class TestReminderMarker:
     def test_get_bookings_excludes_already_reminded(self) -> None:
         assert REMINDER_MARKER_KEY == "bookingReminderSentAt"
         assert "NOT (COALESCE(b.metadata, '{}'::jsonb) ? :reminder_marker_key)" in _GET_BOOKINGS_SQL
+
+
+class TestJsonbBuildObjectParamsAreCast:
+    def test_all_bind_params_inside_jsonb_build_object_have_explicit_casts(self) -> None:
+        # Regression: asyncpg cannot infer the type of a bare bind param inside
+        # jsonb_build_object() — UPDATE "Booking" metadata failed at runtime
+        # with IndeterminateDatatypeError ("could not determine data type of
+        # parameter $1"). Every param there must be wrapped in CAST(... AS TEXT).
+        import re
+
+        import event_booking.adapters.db as db_module
+
+        sql_constants = {k: v for k, v in vars(db_module).items() if k.endswith("_SQL")}
+        assert sql_constants
+        for name, sql in sql_constants.items():
+            for call in re.findall(r"jsonb_build_object\(([^)]*)\)", sql):
+                for param in re.findall(r"(?<!CAST\():\w+", call):
+                    raise AssertionError(f"{name}: uncast bind param {param} inside jsonb_build_object")
