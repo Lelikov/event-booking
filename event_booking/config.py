@@ -18,12 +18,13 @@ class Settings(BaseSettings):
     # Cal.com PostgreSQL
     calcom_postgres_dsn: PostgresDsn = Field(strict=True)
 
-    # RabbitMQ (queue name/args come from event_schemas.queues.BOOKING_LIFECYCLE_BOOKING_QUEUE)
-    rabbit_url: AmqpDsn = "amqp://guest:guest@localhost:5672/"
+    # RabbitMQ (queue name/args come from event_schemas.queues.BOOKING_LIFECYCLE_BOOKING_QUEUE).
+    # No default: guest:guest credentials must never be implicit.
+    rabbit_url: AmqpDsn = Field(strict=True)
     rabbit_exchange: str = "events"
 
-    # event-receiver (publish events)
-    events_endpoint_url: str | None = None
+    # event-receiver (publish events). Required: without it the service silently produces zero output.
+    events_endpoint_url: str = Field(strict=True)
     events_api_key: str | None = None
     events_source: str = "booking"
     events_timeout_seconds: float = 5.0
