@@ -137,7 +137,7 @@ tokenized `meeting_url` (the organizer's moderator URL is never sent to the clie
   "booking_id": "string (cal.com uid)",
   "trigger_event": "BOOKING_CREATED | BOOKING_RESCHEDULED | BOOKING_REASSIGNED | BOOKING_CANCELLED | BOOKING_REMINDER | BOOKING_REJECTED",
   "recipients": [
-    {"email": "client@example.com", "role": "organizer | client"}
+    {"email": "client@example.com", "role": "organizer | client", "locale": "ru (optional; cal.com users.locale / Attendee.locale)"}
   ],
   "template_data": {
     "booking_uid": "uid",

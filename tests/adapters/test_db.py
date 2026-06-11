@@ -61,10 +61,12 @@ class TestFillBookingDto:
             "user_email": "org@test.com",
             "user_locked": False,
             "user_time_zone": "Europe/Moscow",
+            "user_locale": "ru",
             "telegram_chat_id": 12345,
             "client_name": "Client",
             "client_email": "client@test.com",
             "client_time_zone": "Europe/Kiev",
+            "client_locale": "en",
             "event_type_slug": "consultation",
         }
 
@@ -78,6 +80,8 @@ class TestFillBookingDto:
         assert booking.user.name == "Organizer"
         assert booking.client is not None
         assert booking.client.email == "client@test.com"
+        assert booking.user.locale == "ru"
+        assert booking.client.locale == "en"
 
     def test_no_user_no_client(self) -> None:
         from datetime import UTC, datetime

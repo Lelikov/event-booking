@@ -6,7 +6,7 @@ from event_schemas.types import EventType
 
 from event_booking.controllers.booking import CLIENT_PREFIX, BookingController
 from event_booking.dtos import ConstraintsResult
-from tests.factories import make_booking
+from tests.factories import make_booking, make_client, make_user
 
 
 def make_controller(  # noqa: PLR0913
@@ -97,6 +97,61 @@ class TestHandleCreated:
         assert by_role["organizer"]["template_data"]["meeting_url"] == "https://short.test/org"
         assert by_role["client"]["template_data"]["meeting_url"] == "https://short.test/client"
         assert by_role["client"]["recipients"] == [{"email": booking.client.email, "role": "client"}]
+
+    async def test_recipient_locale_propagates_from_calcom_rows(
+        self,
+        mock_db: AsyncMock,
+        mock_events: AsyncMock,
+        mock_chat_controller: AsyncMock,
+        mock_meeting_controller: AsyncMock,
+        mock_constraints_analyzer: MagicMock,
+    ) -> None:
+        """users.locale / Attendee.locale reach notification.send_requested recipients."""
+        booking = make_booking(user=make_user(locale="ru"), client=make_client(locale="en"))
+        mock_db.get_booking = AsyncMock(return_value=booking)
+        mock_chat_controller.has_messages = AsyncMock(return_value=False)
+
+        controller = make_controller(
+            mock_db=mock_db,
+            mock_events=mock_events,
+            mock_chat_controller=mock_chat_controller,
+            mock_meeting_controller=mock_meeting_controller,
+            mock_constraints_analyzer=mock_constraints_analyzer,
+        )
+
+        await controller.handle_created(booking.uid, ce_id="ce-1")
+
+        by_role = {
+            call.kwargs["recipients"][0]["role"]: call.kwargs["recipients"][0]
+            for call in mock_events.send_notification_command.call_args_list
+        }
+        assert by_role["organizer"]["locale"] == "ru"
+        assert by_role["client"]["locale"] == "en"
+
+    async def test_recipient_without_locale_omits_the_key(
+        self,
+        mock_db: AsyncMock,
+        mock_events: AsyncMock,
+        mock_chat_controller: AsyncMock,
+        mock_meeting_controller: AsyncMock,
+        mock_constraints_analyzer: MagicMock,
+    ) -> None:
+        booking = make_booking()
+        mock_db.get_booking = AsyncMock(return_value=booking)
+        mock_chat_controller.has_messages = AsyncMock(return_value=False)
+
+        controller = make_controller(
+            mock_db=mock_db,
+            mock_events=mock_events,
+            mock_chat_controller=mock_chat_controller,
+            mock_meeting_controller=mock_meeting_controller,
+            mock_constraints_analyzer=mock_constraints_analyzer,
+        )
+
+        await controller.handle_created(booking.uid, ce_id="ce-1")
+
+        for call in mock_events.send_notification_command.call_args_list:
+            assert all("locale" not in recipient for recipient in call.kwargs["recipients"])
 
     async def test_writes_client_url_to_calcom_video_call_url(
         self,

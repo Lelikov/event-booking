@@ -4,6 +4,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 
+def notification_recipient(email: str, role: str, locale: str | None = None) -> dict[str, str]:
+    """NotificationRecipient-shaped dict ({email, role, locale?}); locale only when known."""
+    recipient = {"email": email, "role": role}
+    if locale:
+        recipient["locale"] = locale
+    return recipient
+
+
 @dataclass(frozen=True, slots=True)
 class UserDTO:
     id: int
@@ -12,6 +20,7 @@ class UserDTO:
     locked: bool
     time_zone: str
     telegram_chat_id: int | None = None
+    locale: str | None = None  # cal.com users.locale, e.g. "ru" / "en"
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +28,7 @@ class BookingClientDTO:
     name: str
     email: str
     time_zone: str
+    locale: str | None = None  # cal.com Attendee.locale, e.g. "ru" / "en"
 
 
 @dataclass(frozen=True, slots=True)

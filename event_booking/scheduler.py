@@ -8,7 +8,7 @@ from dishka import AsyncContainer
 from event_schemas.types import EventType, TriggerEvent
 
 from event_booking.adapters.db import BookingDatabaseAdapter
-from event_booking.dtos import BookingDTO
+from event_booking.dtos import BookingDTO, notification_recipient
 from event_booking.interfaces.events import IEventPublisher
 
 logger = structlog.get_logger(__name__)
@@ -69,9 +69,9 @@ class ReminderScheduler:
     async def _send_reminder(self, booking: BookingDTO) -> None:
         recipients = []
         if booking.user:
-            recipients.append({"email": booking.user.email, "role": "organizer"})
+            recipients.append(notification_recipient(booking.user.email, "organizer", booking.user.locale))
         if booking.client:
-            recipients.append({"email": booking.client.email, "role": "client"})
+            recipients.append(notification_recipient(booking.client.email, "client", booking.client.locale))
 
         template_data: dict = {
             "booking_uid": booking.uid,

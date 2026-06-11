@@ -12,7 +12,7 @@ flow stopped without duplicating side effects.
 import structlog
 from event_schemas.types import EventType, RecipientRole, TriggerEvent
 
-from event_booking.dtos import BookingDTO, ConstraintsResult, MeetingUrls
+from event_booking.dtos import BookingDTO, ConstraintsResult, MeetingUrls, notification_recipient
 from event_booking.interfaces.chat import IChatController
 from event_booking.interfaces.constraints import IBookingConstraintsAnalyzer
 from event_booking.interfaces.db import IBookingDatabaseAdapter
@@ -257,22 +257,24 @@ class BookingController:
         """Send one notification command per participant with that participant's own meeting URL."""
         base_data = {**self._build_template_data(booking), **extra_template_data}
 
-        recipients: list[tuple[str, str, str | None]] = []
+        recipients: list[tuple[dict[str, str], str | None]] = []
         if booking.user:
-            recipients.append((booking.user.email, RecipientRole.ORGANIZER.value, urls.organizer if urls else None))
+            recipient = notification_recipient(booking.user.email, RecipientRole.ORGANIZER.value, booking.user.locale)
+            recipients.append((recipient, urls.organizer if urls else None))
         if booking.client:
-            recipients.append((booking.client.email, RecipientRole.CLIENT.value, urls.client if urls else None))
+            recipient = notification_recipient(booking.client.email, RecipientRole.CLIENT.value, booking.client.locale)
+            recipients.append((recipient, urls.client if urls else None))
 
-        for email, role, meeting_url in recipients:
+        for recipient, meeting_url in recipients:
             template_data = dict(base_data)
             if meeting_url:
                 template_data["meeting_url"] = meeting_url
             await self._events.send_notification_command(
                 booking_uid=booking.uid,
                 trigger_event=trigger_event.value,
-                recipients=[{"email": email, "role": role}],
+                recipients=[recipient],
                 template_data=template_data,
-                dedupe_key=_dedupe(ce_id, "notification", trigger_event.value, role),
+                dedupe_key=_dedupe(ce_id, "notification", trigger_event.value, recipient["role"]),
             )
 
     @staticmethod
@@ -310,7 +312,9 @@ class BookingController:
 
         recipients: list[dict[str, str]] = []
         if booking.client:
-            recipients.append({"email": booking.client.email, "role": RecipientRole.CLIENT.value})
+            recipients.append(
+                notification_recipient(booking.client.email, RecipientRole.CLIENT.value, booking.client.locale)
+            )
 
         await self._events.send_notification_command(
             booking_uid=booking.uid,

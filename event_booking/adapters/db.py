@@ -31,10 +31,12 @@ _GET_BOOKING_SQL = """
         u.email        AS user_email,
         u.locked       AS user_locked,
         u."timeZone"   AS user_time_zone,
+        u.locale       AS user_locale,
         u."tgChatId"   AS telegram_chat_id,
         a.name         AS client_name,
         a.email        AS client_email,
         a."timeZone"   AS client_time_zone,
+        a.locale       AS client_locale,
         et.slug        AS event_type_slug
     FROM "Booking" b
     LEFT JOIN users u ON u.id = b."userId"
@@ -60,10 +62,12 @@ _GET_BOOKINGS_SQL = """
         u.email        AS user_email,
         u.locked       AS user_locked,
         u."timeZone"   AS user_time_zone,
+        u.locale       AS user_locale,
         u."tgChatId"   AS telegram_chat_id,
         a.name         AS client_name,
         a.email        AS client_email,
         a."timeZone"   AS client_time_zone,
+        a.locale       AS client_locale,
         et.slug        AS event_type_slug
     FROM "Booking" b
     LEFT JOIN users u ON u.id = b."userId"
@@ -149,6 +153,7 @@ class BookingDatabaseAdapter:
                 locked=row.get("user_locked", False),
                 time_zone=row.get("user_time_zone", ""),
                 telegram_chat_id=row.get("telegram_chat_id"),
+                locale=row.get("user_locale"),
             )
 
         client: BookingClientDTO | None = None
@@ -157,6 +162,7 @@ class BookingDatabaseAdapter:
                 name=row["client_name"],
                 email=row.get("client_email", ""),
                 time_zone=row.get("client_time_zone", ""),
+                locale=row.get("client_locale"),
             )
 
         return BookingDTO(

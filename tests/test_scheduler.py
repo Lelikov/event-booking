@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 from event_booking.scheduler import ReminderScheduler
 from tests.conftest import FakeContainer
-from tests.factories import make_booking
+from tests.factories import make_booking, make_client, make_user
 
 
 def make_scheduler(db: AsyncMock, events: AsyncMock) -> ReminderScheduler:
@@ -32,6 +32,20 @@ class TestSendReminders:
         call_kwargs = mock_events.send_notification_command.call_args.kwargs
         assert call_kwargs["booking_uid"] == "booking-abc"
         assert call_kwargs["trigger_event"] == "BOOKING_REMINDER"
+
+    async def test_reminder_recipients_carry_locale_when_known(self) -> None:
+        booking = make_booking(user=make_user(locale="ru"), client=make_client())
+        mock_db = AsyncMock()
+        mock_db.get_bookings.return_value = [booking]
+        mock_events = AsyncMock()
+
+        scheduler = make_scheduler(mock_db, mock_events)
+        await scheduler.send_reminders()
+
+        recipients = mock_events.send_notification_command.call_args.kwargs["recipients"]
+        by_role = {recipient["role"]: recipient for recipient in recipients}
+        assert by_role["organizer"]["locale"] == "ru"
+        assert "locale" not in by_role["client"]
 
     async def test_marks_reminder_sent_to_prevent_duplicates(self) -> None:
         """10-min window / 5-min poll sees every booking twice — the persistent marker must be written."""

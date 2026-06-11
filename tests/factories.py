@@ -5,15 +5,24 @@ from datetime import UTC, datetime, timedelta
 from event_booking.dtos import BookingClientDTO, BookingDTO, UserDTO
 
 
-def make_user(
+def make_user(  # noqa: PLR0913
     *,
     id: int = 1,  # noqa: A002
     name: str = "Organizer",
     email: str = "organizer@test.com",
     time_zone: str = "Europe/Moscow",
     telegram_chat_id: int = 12345,
+    locale: str | None = None,
 ) -> UserDTO:
-    return UserDTO(id=id, name=name, email=email, locked=False, time_zone=time_zone, telegram_chat_id=telegram_chat_id)
+    return UserDTO(
+        id=id,
+        name=name,
+        email=email,
+        locked=False,
+        time_zone=time_zone,
+        telegram_chat_id=telegram_chat_id,
+        locale=locale,
+    )
 
 
 def make_client(
@@ -21,8 +30,9 @@ def make_client(
     name: str = "Client",
     email: str = "client@test.com",
     time_zone: str = "Europe/Kiev",
+    locale: str | None = None,
 ) -> BookingClientDTO:
-    return BookingClientDTO(name=name, email=email, time_zone=time_zone)
+    return BookingClientDTO(name=name, email=email, time_zone=time_zone, locale=locale)
 
 
 def make_booking(  # noqa: PLR0913
