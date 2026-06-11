@@ -26,6 +26,19 @@ HANDLED_EVENTS: frozenset[str] = frozenset(
 )
 
 
+def extract_event_data(cloud_event: object) -> dict:
+    """Unwrap the {original, normalized} envelope from a parsed CloudEvent.
+
+    cloudevents 2.x core CloudEvent exposes payload via ``get_data()`` (there
+    is no ``.data`` attribute); binary-mode JSON bodies may still arrive as
+    raw bytes depending on content type.
+    """
+    raw_data = cloud_event.get_data()  # type: ignore[attr-defined]
+    if isinstance(raw_data, bytes):
+        raw_data = json.loads(raw_data)
+    return unwrap_payload(raw_data if isinstance(raw_data, dict) else None)
+
+
 class BookingConsumer:
     def __init__(self, container: AsyncContainer) -> None:
         self._container = container
@@ -97,10 +110,7 @@ class BookingConsumer:
 
             event_type: str = cloud_event.get_attributes().get("type", "")
             booking_uid: str = cloud_event.get_attributes().get(BOOKING_ID_ATTRIBUTE) or ""
-            raw_data = cloud_event.data
-            if isinstance(raw_data, bytes):
-                raw_data = json.loads(raw_data)
-            data: dict = unwrap_payload(raw_data if isinstance(raw_data, dict) else None)
+            data: dict = extract_event_data(cloud_event)
 
             if event_type not in HANDLED_EVENTS:
                 logger.warning("Unhandled event type, skipping", event_type=event_type)

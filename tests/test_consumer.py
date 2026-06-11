@@ -105,3 +105,29 @@ class TestEnvelopeUnwrap:
         }
 
         assert unwrap_payload(data) == {"cancellation_reason": "Client request"}
+
+
+class TestExtractEventData:
+    def test_extracts_original_from_binary_mode_cloudevent(self) -> None:
+        # Regression: handle_message used `cloud_event.data`, which does not
+        # exist on cloudevents 2.x core CloudEvent (only `get_data()`), so
+        # every consumed message crashed with AttributeError.
+        import json
+
+        from cloudevents.core.bindings.http import HTTPMessage, from_http
+        from cloudevents.core.formats.json import JSONFormat
+
+        from event_booking.consumer import extract_event_data
+
+        body = json.dumps({"original": {"uid": "abc"}, "normalized": {}}).encode()
+        headers = {
+            "ce-type": "booking.created",
+            "ce-source": "test",
+            "ce-id": "1",
+            "ce-specversion": "1.0",
+            "ce-time": "2026-01-01T00:00:00Z",
+            "content-type": "application/json",
+        }
+        cloud_event = from_http(HTTPMessage(headers=headers, body=body), JSONFormat())
+
+        assert extract_event_data(cloud_event) == {"uid": "abc"}
