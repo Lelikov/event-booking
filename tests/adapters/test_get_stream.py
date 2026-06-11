@@ -126,3 +126,26 @@ class TestEventLoopOffload:
             await adapter.create_chat(channel_id="c", organizer_id="o@t.com", client_id="cl@t.com")
 
         mock_to_thread.assert_called_once()
+
+
+class TestBaseUrl:
+    def test_default_points_at_production(self) -> None:
+        with patch("event_booking.adapters.get_stream.StreamChat") as stream_chat:
+            GetStreamAdapter(
+                chat_api_key="key",
+                chat_api_secret="secret",
+                user_id_encryption_key=ENCRYPTION_KEY,
+            )
+
+        assert stream_chat.call_args.kwargs["base_url"] == "https://chat.stream-io-api.com"
+
+    def test_override_reaches_sdk(self) -> None:
+        with patch("event_booking.adapters.get_stream.StreamChat") as stream_chat:
+            GetStreamAdapter(
+                chat_api_key="key",
+                chat_api_secret="secret",
+                user_id_encryption_key=ENCRYPTION_KEY,
+                base_url="http://mocks:8080/getstream",
+            )
+
+        assert stream_chat.call_args.kwargs["base_url"] == "http://mocks:8080/getstream"

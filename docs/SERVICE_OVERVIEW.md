@@ -92,6 +92,7 @@ ReminderScheduler                         (scheduler.py)
 | `CHAT_API_SECRET` | Yes | - | GetStream API secret |
 | `CHAT_USER_ID_ENCRYPTION_KEY` | Yes | - | AES-GCM key material for chat user ids (must match event-receiver) |
 | `CHAT_TIMEOUT_SECONDS` | No | `6.0` | GetStream SDK request timeout |
+| `CHAT_BASE_URL` | No | `https://chat.stream-io-api.com` | GetStream API base URL (override only for local mock stacks) |
 | `SHORTENER_URL` | Yes | - | Base URL of Shortify service |
 | `SHORTENER_API_KEY` | No | - | Shortify API key (optional) |
 | `IS_ENABLE_BOOKING_CONSTRAINTS` | No | `False` | Enable/disable constraint validation |

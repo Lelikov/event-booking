@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     chat_api_secret: str = Field(strict=True)
     chat_user_id_encryption_key: str = Field(strict=True)
     chat_timeout_seconds: float = 6.0
+    # Production GetStream endpoint; override only to point at a local mock/integration stack.
+    chat_base_url: str = "https://chat.stream-io-api.com"
 
     # Shortify
     shortener_url: str = Field(strict=True)

@@ -97,6 +97,7 @@ class AppProvider(Provider):
             chat_api_secret=settings.chat_api_secret,
             user_id_encryption_key=settings.chat_user_id_encryption_key,
             timeout_seconds=settings.chat_timeout_seconds,
+            base_url=settings.chat_base_url,
         )
 
     @provide

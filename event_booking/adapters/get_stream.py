@@ -35,8 +35,14 @@ class GetStreamAdapter:
         chat_api_secret: str,
         user_id_encryption_key: str,
         timeout_seconds: float = 6.0,
+        base_url: str = "https://chat.stream-io-api.com",
     ) -> None:
-        self._client = StreamChat(api_key=chat_api_key, api_secret=chat_api_secret, timeout=timeout_seconds)
+        self._client = StreamChat(
+            api_key=chat_api_key,
+            api_secret=chat_api_secret,
+            timeout=timeout_seconds,
+            base_url=base_url,
+        )
         self._cipher_key = hashlib.sha256(user_id_encryption_key.encode()).digest()
 
     def _encode_user_id(self, *, user_id: str) -> str:
