@@ -1,6 +1,14 @@
-"""Database adapter for Cal.com PostgreSQL via raw SQL."""
+"""Database adapter for Cal.com PostgreSQL via raw SQL.
 
-from datetime import datetime
+cal.com stores timestamps as ``timestamp(3) without time zone`` (naive UTC).
+This adapter is the timezone boundary: every datetime leaving it is aware UTC,
+every datetime bound as a query parameter is converted back to naive UTC.
+
+cal.com owns its rows: bookings rejected by constraints are marked
+``status='rejected'`` (cal.com's own cancellation semantics) — never deleted.
+"""
+
+from datetime import UTC, datetime
 
 from sqlalchemy.engine import RowMapping
 
@@ -8,7 +16,7 @@ from event_booking.dtos import AttendeeBookingDTO, BookingClientDTO, BookingDTO,
 from event_booking.interfaces.sql import ISqlExecutor
 
 _GET_BOOKING_SQL = """
-    SELECT
+    SELECT DISTINCT ON (b.id)
         b.id           AS booking_id,
         b.uid          AS uid,
         b.title        AS title,
@@ -33,10 +41,11 @@ _GET_BOOKING_SQL = """
     LEFT JOIN "Attendee" a ON a."bookingId" = b.id
     LEFT JOIN "EventType" et ON et.id = b."eventTypeId"
     WHERE b.uid = :uid
+    ORDER BY b.id, a.id ASC NULLS LAST
 """
 
 _GET_BOOKINGS_SQL = """
-    SELECT
+    SELECT DISTINCT ON (b.id)
         b.id           AS booking_id,
         b.uid          AS uid,
         b.title        AS title,
@@ -63,6 +72,8 @@ _GET_BOOKINGS_SQL = """
     WHERE b.status = 'accepted'
       AND b."startTime" >= :start_time_from
       AND b."startTime" <= :start_time_to
+      AND NOT (COALESCE(b.metadata, '{}'::jsonb) ? :reminder_marker_key)
+    ORDER BY b.id, a.id ASC NULLS LAST
 """
 
 _GET_ATTENDEE_BOOKINGS_SQL = """
@@ -77,20 +88,7 @@ _GET_ATTENDEE_BOOKINGS_SQL = """
     FROM "Attendee" a
     JOIN "Booking" b ON b.id = a."bookingId"
     WHERE lower(regexp_replace(a.email, '\\+[^@]+', '')) = :normalized_email
-"""
-
-_GET_USER_BY_EMAIL_SQL = """
-    SELECT id, name, email, locked, "timeZone", "tgChatId" AS telegram_chat_id
-    FROM users
-    WHERE email = :email
-"""
-
-_GET_ORGANIZER_CHAT_ID_SQL = """
-    SELECT "tgChatId" AS telegram_chat_id
-    FROM users
-    WHERE email = :email
-      AND locked = FALSE
-      AND "tgChatId" IS NOT NULL
+      AND b.id != :exclude_booking_id
 """
 
 _UPDATE_VIDEO_URL_SQL = """
@@ -99,15 +97,34 @@ _UPDATE_VIDEO_URL_SQL = """
     WHERE uid = :uid
 """
 
-_DELETE_ATTENDEE_SQL = """
-    DELETE FROM "Attendee"
-    WHERE "bookingId" = :booking_id
+_MARK_REMINDER_SENT_SQL = """
+    UPDATE "Booking"
+    SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(:reminder_marker_key, :sent_at)
+    WHERE uid = :uid
 """
 
-_DELETE_BOOKING_SQL = """
-    DELETE FROM "Booking"
+_REJECT_BOOKING_SQL = """
+    UPDATE "Booking"
+    SET status = 'rejected',
+        "rejectionReason" = :reason
     WHERE id = :booking_id
 """
+
+REMINDER_MARKER_KEY = "bookingReminderSentAt"
+
+
+def _as_utc(value: datetime) -> datetime:
+    """cal.com stores naive UTC; attach tzinfo so the rest of the app is aware-only."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _as_naive_utc(value: datetime) -> datetime:
+    """Bindable parameter for cal.com 'timestamp without time zone' columns."""
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 class BookingDatabaseAdapter:
@@ -147,9 +164,9 @@ class BookingDatabaseAdapter:
             uid=row["uid"],
             title=row["title"],
             status=row["status"],
-            start_time=row["start_time"],
-            end_time=row["end_time"],
-            created_at=row["created_at"],
+            start_time=_as_utc(row["start_time"]),
+            end_time=_as_utc(row["end_time"]),
+            created_at=_as_utc(row["created_at"]),
             metadata=row.get("metadata"),
             from_reschedule=row.get("from_reschedule"),
             event_type_slug=row.get("event_type_slug"),
@@ -166,15 +183,19 @@ class BookingDatabaseAdapter:
     async def get_bookings(self, start_time_from: datetime, start_time_to: datetime) -> list[BookingDTO]:
         rows = await self._executor.fetch_all(
             _GET_BOOKINGS_SQL,
-            {"start_time_from": start_time_from, "start_time_to": start_time_to},
+            {
+                "start_time_from": _as_naive_utc(start_time_from),
+                "start_time_to": _as_naive_utc(start_time_to),
+                "reminder_marker_key": REMINDER_MARKER_KEY,
+            },
         )
         return [self._fill_booking_dto(row) for row in rows]
 
-    async def get_attendee_bookings_by_email(self, *, email: str) -> list[AttendeeBookingDTO]:
+    async def get_attendee_bookings_by_email(self, *, email: str, exclude_booking_id: int) -> list[AttendeeBookingDTO]:
         normalized = self._normalize_email(email)
         rows = await self._executor.fetch_all(
             _GET_ATTENDEE_BOOKINGS_SQL,
-            {"normalized_email": normalized},
+            {"normalized_email": normalized, "exclude_booking_id": exclude_booking_id},
         )
         return [
             AttendeeBookingDTO(
@@ -182,39 +203,26 @@ class BookingDatabaseAdapter:
                 booking_uid=row["booking_uid"],
                 name=row["name"],
                 email=row["email"],
-                start_time=row["start_time"],
-                end_time=row["end_time"],
+                start_time=_as_utc(row["start_time"]),
+                end_time=_as_utc(row["end_time"]),
                 status=row["status"],
             )
             for row in rows
         ]
 
-    async def get_user_by_email(self, email: str) -> UserDTO | None:
-        row = await self._executor.fetch_one(_GET_USER_BY_EMAIL_SQL, {"email": email})
-        if row is None:
-            return None
-        return UserDTO(
-            id=row["id"],
-            name=row["name"],
-            email=row["email"],
-            locked=row["locked"],
-            time_zone=row["timeZone"],
-            telegram_chat_id=row.get("telegram_chat_id"),
-        )
-
-    async def get_organizer_chat_id(self, email: str) -> int | None:
-        row = await self._executor.fetch_one(_GET_ORGANIZER_CHAT_ID_SQL, {"email": email})
-        if row is None:
-            return None
-        return row["telegram_chat_id"]
-
     async def update_booking_video_url(self, booking_uid: str, url: str) -> None:
         await self._executor.execute(_UPDATE_VIDEO_URL_SQL, {"uid": booking_uid, "url": url})
 
-    async def delete_booking_and_attendee_by_booking_id(self, *, booking_id: int) -> None:
-        await self._executor.execute_in_transaction(
-            [
-                (_DELETE_ATTENDEE_SQL, {"booking_id": booking_id}),
-                (_DELETE_BOOKING_SQL, {"booking_id": booking_id}),
-            ]
+    async def mark_reminder_sent(self, booking_uid: str, sent_at: datetime) -> None:
+        await self._executor.execute(
+            _MARK_REMINDER_SENT_SQL,
+            {
+                "uid": booking_uid,
+                "reminder_marker_key": REMINDER_MARKER_KEY,
+                "sent_at": sent_at.astimezone(UTC).isoformat(),
+            },
         )
+
+    async def reject_booking(self, *, booking_id: int, reason: str) -> None:
+        """Mark a booking rejected in cal.com (cal.com owns its rows — never DELETE)."""
+        await self._executor.execute(_REJECT_BOOKING_SQL, {"booking_id": booking_id, "reason": reason})

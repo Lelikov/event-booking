@@ -95,7 +95,14 @@ class TestHandleCreated:
 
         await controller.handle_created(booking.uid)
 
-        mock_db.delete_booking_and_attendee_by_booking_id.assert_called_once_with(booking_id=booking.id)
+        mock_db.get_attendee_bookings_by_email.assert_called_once_with(
+            email=booking.client.email,
+            exclude_booking_id=booking.id,
+        )
+        mock_db.reject_booking.assert_called_once_with(
+            booking_id=booking.id,
+            reason="Active future booking already exists",
+        )
         mock_events.send_notification_command.assert_called_once()
         notif_kwargs = mock_events.send_notification_command.call_args.kwargs
         assert notif_kwargs["trigger_event"] == "BOOKING_REJECTED"
@@ -190,8 +197,7 @@ class TestHandleRescheduled:
         mock_meeting_controller: AsyncMock,
         mock_constraints_analyzer: MagicMock,
     ) -> None:
-        booking = make_booking()
-        booking.from_reschedule = "old-booking-uid"
+        booking = make_booking(from_reschedule="old-booking-uid")
         mock_db.get_booking = AsyncMock(return_value=booking)
 
         controller = make_controller(

@@ -47,10 +47,13 @@ class BookingController:
             return
 
         if self._is_enable_constraints and booking.client:
-            attendee_bookings = await self._db.get_attendee_bookings_by_email(email=booking.client.email)
+            attendee_bookings = await self._db.get_attendee_bookings_by_email(
+                email=booking.client.email,
+                exclude_booking_id=booking.id,
+            )
             result = self._constraints.analyze_on_create(booking=booking, attendee_bookings=attendee_bookings)
             if not result.is_allowed:
-                await self._db.delete_booking_and_attendee_by_booking_id(booking_id=booking.id)
+                await self._db.reject_booking(booking_id=booking.id, reason="; ".join(result.rejection_reasons))
                 await self._send_rejection_notification(booking, result)
                 await self._events.send_event(
                     booking_uid=booking.uid,

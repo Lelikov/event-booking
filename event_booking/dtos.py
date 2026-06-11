@@ -21,10 +21,8 @@ class BookingClientDTO:
     time_zone: str
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class BookingDTO:
-    """Mutable: previous_booking is set after initial construction."""
-
     created_at: datetime
     end_time: datetime
     id: int
@@ -35,7 +33,6 @@ class BookingDTO:
     user: UserDTO | None = None
     client: BookingClientDTO | None = None
     metadata: dict | None = None
-    previous_booking: BookingDTO | None = None
     event_type_slug: str | None = None
     from_reschedule: str | None = None
 

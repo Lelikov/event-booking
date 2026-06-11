@@ -33,6 +33,7 @@ def make_booking(  # noqa: PLR0913
     user: UserDTO | None = None,
     client: BookingClientDTO | None = None,
     status: str = "accepted",
+    from_reschedule: str | None = None,
 ) -> BookingDTO:
     st = start_time or datetime(2026, 6, 15, 10, 0, tzinfo=UTC)
     et = end_time or (st + timedelta(hours=1))
@@ -46,4 +47,5 @@ def make_booking(  # noqa: PLR0913
         uid=uid,
         user=user or make_user(),
         client=client or make_client(),
+        from_reschedule=from_reschedule,
     )
