@@ -2,7 +2,7 @@
 
 > **Maturity: EARLY / PRE-PRODUCTION**
 >
-> This service is a core domain orchestrator for managing booking constraints, chat creation, and meeting URL generation. It is under active development and not yet production-ready. Known gaps: no error recovery strategy for partial failures, constraint analyzer design is preliminary, and reminder scheduler has no persistent state across restarts.
+> This service is a core domain orchestrator for managing booking constraints, chat creation, and meeting URL generation. Audit-v2 (2026-06-11) hardening: idempotent-resume reliability model (no partial-failure orphans), persistent reminder marker, per-participant meeting URLs, AES-GCM chat user ids. See `docs/AUDIT.md`.
 
 ## Domain
 
@@ -67,11 +67,11 @@ ReminderScheduler                         (scheduler.py)
 
 | Dependency | Role | Connection |
 |---|---|---|
-| **RabbitMQ** | Message broker (consumer) | `RABBIT_URL` (AMQP), topic exchange `events`, queue `events.booking.lifecycle` |
+| **RabbitMQ** | Message broker (consumer) | `RABBIT_URL` (AMQP, required), topic exchange `events`, queue `events.booking.lifecycle.booking` |
 | **Cal.com PostgreSQL** | Persistent store (read/write) | `CALCOM_POSTGRES_DSN` (asyncpg), manages booking and attendee records |
 | **event-receiver** | Event publishing (HTTP) | `EVENTS_ENDPOINT_URL`, `EVENTS_API_KEY` (Bearer token) |
 | **GetStream Chat API** | Chat channel creation/deletion | `CHAT_API_KEY`, `CHAT_API_SECRET`, HTTP REST |
-| **Jitsi** | Meeting URL generation (JWT only) | `JITSI_JWT_SECRET`, `JITSI_JWT_AUD`, `JITSI_JWT_ISS`, no direct connection (JWT only) |
+| **Jitsi** | Meeting URL generation (JWT only) | `JITSI_JWT_SECRET`, `JITSI_JWT_AUD`, `JITSI_JWT_ISS`, `JITSI_JWT_SUB`, no direct connection (JWT only) |
 | **Shortify** | URL shortening service | `SHORTENER_URL`, `SHORTENER_API_KEY` (optional), HTTP REST |
 
 ## Key Environment Variables
@@ -79,18 +79,19 @@ ReminderScheduler                         (scheduler.py)
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `CALCOM_POSTGRES_DSN` | Yes | - | Cal.com PostgreSQL connection string |
-| `RABBIT_URL` | No | `amqp://guest:guest@localhost:5672/` | RabbitMQ AMQP URL |
-| `RABBIT_EXCHANGE` | No | `events` | Exchange name |
-| `BOOKING_LIFECYCLE_QUEUE` | No | `events.booking.lifecycle` | Queue to consume |
-| `EVENTS_ENDPOINT_URL` | Yes | - | Base URL of event-receiver (`POST /event/cloudevents`) |
-| `EVENTS_API_KEY` | Yes | - | Bearer token for event-receiver |
+| `RABBIT_URL` | Yes | - | RabbitMQ AMQP URL (no guest:guest default) |
+| `RABBIT_EXCHANGE` | No | `events` | Exchange name (queue spec from `event_schemas.queues`) |
+| `EVENTS_ENDPOINT_URL` | Yes | - | event-receiver endpoint (`POST /event/booking`); service refuses to start without it |
+| `EVENTS_API_KEY` | No | - | API key for event-receiver (raw `Authorization` header) |
 | `JITSI_JWT_SECRET` | Yes | - | Jitsi JWT signing secret |
 | `JITSI_JWT_AUD` | Yes | - | Jitsi JWT audience claim |
 | `JITSI_JWT_ISS` | Yes | - | Jitsi JWT issuer claim |
+| `JITSI_JWT_SUB` | Yes | - | Jitsi JWT sub (fixed tenant/domain; never `*`) |
 | `MEETING_HOST_URL` | No | `http://localhost:8080` | Base URL for Jitsi meeting links |
 | `CHAT_API_KEY` | Yes | - | GetStream API key |
 | `CHAT_API_SECRET` | Yes | - | GetStream API secret |
-| `CHAT_USER_ID_ENCRYPTION_KEY` | Yes | - | Key for encrypting user IDs in chat |
+| `CHAT_USER_ID_ENCRYPTION_KEY` | Yes | - | AES-GCM key material for chat user ids (must match event-receiver) |
+| `CHAT_TIMEOUT_SECONDS` | No | `6.0` | GetStream SDK request timeout |
 | `SHORTENER_URL` | Yes | - | Base URL of Shortify service |
 | `SHORTENER_API_KEY` | No | - | Shortify API key (optional) |
 | `IS_ENABLE_BOOKING_CONSTRAINTS` | No | `False` | Enable/disable constraint validation |
@@ -129,7 +130,6 @@ graph TB
         DB["adapters/db.py<br/>Cal.com Database Adapter"]
         EP["adapters/events.py<br/>Event Publisher (HTTP)"]
         GS["adapters/get_stream.py<br/>GetStream Client"]
-        JW["adapters/jitsi.py<br/>JWT Generator"]
         SH["adapters/shortener.py<br/>Shortify Client"]
         SQL["adapters/sql.py<br/>SqlExecutor"]
     end
@@ -150,7 +150,7 @@ graph TB
     CONSUMER --> BC
     BC --> IDB & IEP & IMC & ICA
     CC --> GS
-    MC --> JW & SH
+    MC --> SH
     CA --> DTOs
     IOC --> MAIN
     DB --> SQL
@@ -168,7 +168,7 @@ graph TB
 | Entry | `main.py`, `scheduler.py`, `consumer.py` | Lifespan, message routing, background tasks |
 | Domain models | `dtos.py` | Data transfer objects (BookingDTO, ConstraintsResult) |
 | Application | `controllers/booking.py`, `controllers/chat.py`, `controllers/meeting.py`, `controllers/constraints.py` | Orchestration and business logic |
-| Infrastructure | `adapters/db.py`, `adapters/events.py`, `adapters/get_stream.py`, `adapters/jitsi.py`, `adapters/shortener.py`, `adapters/sql.py` | Database, HTTP clients, external service integrations |
+| Infrastructure | `adapters/db.py`, `adapters/events.py`, `adapters/get_stream.py`, `adapters/shortener.py`, `adapters/sql.py` | Database, HTTP clients, external service integrations (Jitsi JWT is minted in `controllers/meeting.py`) |
 | Interfaces | `interfaces/db.py`, `interfaces/events.py`, `interfaces/meeting.py`, `interfaces/constraints.py` | Protocol definitions for loose coupling |
 | DI/Config | `ioc.py`, `config.py`, `logger.py` | Dependency injection, configuration, logging |
 
@@ -208,39 +208,46 @@ Reference: `controllers/booking.py`, `adapters/events.py`
    - Publish `meeting.url_created` and `chat.created` audit events
    - Publish `notification.send_requested` to event-notifier (notify both parties)
 
-2. **booking.rescheduled** event arrives
-   - Regenerate meeting URL (new JWT with updated start time)
-   - Update in Cal.com database
-   - Publish `notification.send_requested` with new time info
+2. **booking.rescheduled** event arrives (cal.com mints a NEW uid)
+   - Delete the OLD uid's chat (from payload `previous_booking_uid`, fallback cal.com `fromReschedule`)
+   - Create chat for the new uid (welcome skipped if channel already has messages)
+   - MOVE short URLs from the old external ids onto the new uid (shortener update API, create fallback)
+   - Write client URL to cal.com `Booking.metadata.videoCallUrl`
+   - Publish per-recipient `notification.send_requested` with each recipient's own `meeting_url` and `previous_start_time`
 
 3. **booking.reassigned** event arrives
-   - Delete old GetStream channel
-   - Recreate with new organizer
-   - Regenerate meeting URL
-   - Publish `chat.deleted` and `chat.created` audit events
-   - Publish `notification.send_requested`
+   - HARD-delete the GetStream channel (soft-deleted channel ids cannot be recreated)
+   - Recreate with new organizer; regenerate both participants' URLs in place
+   - Publish `chat.deleted`/`chat.created` and per-recipient `notification.send_requested`
 
 4. **booking.cancelled** event arrives
-   - Delete GetStream chat channel
+   - Publish per-recipient `notification.send_requested` with cancellation info
+   - Delete GetStream chat channel and both short URLs
    - Publish `chat.deleted` and `meeting.url_deleted` audit events
-   - Publish `notification.send_requested` with cancellation info
 
 5. **Reminder Scheduler** (background)
    - Polls Cal.com database every N seconds
-   - Finds bookings with start_time in [now + 55 min, now + 65 min]
-   - Emits `booking.reminder_sent` event
-   - event-notifier receives and sends reminder notifications
+   - Finds bookings with start_time in [now + 55 min, now + 65 min] WITHOUT the `bookingReminderSentAt` metadata marker
+   - Publishes `notification.send_requested` (BOOKING_REMINDER) per booking with deterministic dedupe key, emits `booking.reminder_sent`, then writes the marker
+
+### Reliability Model (idempotent resume)
+
+Every step is idempotent: chat creation returns the existing channel, welcome
+messages are skipped when the channel already has messages, short URLs are keyed
+by external id, and all follow-up events carry deterministic dedupe ids derived
+from the inbound CloudEvent id. Any failure propagates -> the message is rejected
+and dead-letters to `events.booking.lifecycle.booking.dlq` (24h TTL) -> a DLQ
+replay resumes exactly where the flow stopped without duplicating side effects.
 
 ## Known Limitations and Gaps
 
 | Severity | Issue | Location | Status |
 |---|---|---|---|
-| HIGH | No rollback on partial failure (chat created but URL generation fails) | `controllers/booking.py:62-150` | Open (needs transaction-like semantics) |
-| HIGH | Constraint analyzer design preliminary; no validation against complex rules | `controllers/constraints.py` | Open (design phase) |
-| MEDIUM | Reminder scheduler has no persistent cursor; restarts may re-emit reminders | `scheduler.py:30-80` | Open |
-| MEDIUM | No timeout handling for GetStream or Shortify HTTP requests | `adapters/get_stream.py`, `adapters/shortener.py` | Open |
-| LOW | Database schema not versioned via Alembic; Cal.com schema is pre-created | No Alembic migrations | Open (schema defined externally) |
-| LOW | Meeting URL audit events (`meeting.url_created/deleted`) not consumed by any service | `dtos.py:20` | Open (audit-only, acceptable) |
+| HIGH | No rollback on partial failure | `controllers/booking.py` | Fixed (audit-v2): idempotent resume + DLQ replay |
+| HIGH | Reminder scheduler duplicates | `scheduler.py` | Fixed (audit-v2): persistent metadata marker + dedupe keys |
+| MEDIUM | Constraint analyzer covers a fixed rule set (active/month/year/interval) only | `controllers/constraints.py` | Open (by design; reschedules are not re-validated) |
+| LOW | cal.com schema is external; no Alembic migrations (HARD INVARIANT: never alter or delete cal.com rows beyond status/metadata updates) | `adapters/db.py` | By design |
+| LOW | DLQ replay is manual (no automatic retry policy) | `consumer.py` | Open (24h TTL parking lot) |
 
 ---
 

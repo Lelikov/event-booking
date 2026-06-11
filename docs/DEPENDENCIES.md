@@ -8,7 +8,7 @@
 |----------|-------|
 | Role | Message ingress (booking lifecycle events) |
 | Protocol | AMQP 0-9-1 |
-| Config | `RABBIT_URL`, `RABBIT_EXCHANGE`, `BOOKING_LIFECYCLE_QUEUE` |
+| Config | `RABBIT_URL` (required), `RABBIT_EXCHANGE`; queue spec from `event_schemas.queues.BOOKING_LIFECYCLE_BOOKING_QUEUE` |
 | Client | FastStream `RabbitBroker` |
 | Connection lifetime | App-scoped (created in lifespan, closed on shutdown) |
 
@@ -52,15 +52,15 @@ Reference: `config.py:19`, `adapters/db.py:1-50`, `ioc.py`
 |----------|-------|
 | Role | Publish events to RabbitMQ (audit events, notifications) |
 | Protocol | HTTP REST |
-| Endpoint | `POST /event/cloudevents` |
-| Auth | Bearer token (`Authorization: Bearer {EVENTS_API_KEY}`) |
+| Endpoint | `POST /event/booking` |
+| Auth | Bearer token (`Authorization: {EVENTS_API_KEY} (raw API key, no Bearer prefix)`) |
 | Config | `EVENTS_ENDPOINT_URL`, `EVENTS_API_KEY`, `EVENTS_TIMEOUT_SECONDS` |
 | Client | httpx `AsyncClient` (timeout: 5s default) |
 | Connection lifetime | App-scoped |
 
 **Request format:**
 - Method: `POST`
-- Headers: `Authorization: Bearer <api_key>`, `Content-Type: application/json`
+- Headers: `Authorization: <api_key> (raw, no Bearer prefix)`, `Content-Type: application/json`
 - Body: JSON CloudEvent object with `type`, `source`, `data` fields
 
 **Response codes:**
@@ -71,8 +71,8 @@ Reference: `config.py:19`, `adapters/db.py:1-50`, `ioc.py`
 
 **Failure modes:**
 - **API key invalid:** Persistent 401 responses. All event publishes fail until key is corrected in config.
-- **Timeout (>5s):** httpx raises `TimeoutException`. Caught by `EventPublisher`, exception propagated to caller (RabbitMQ message nacked/requeued).
-- **HTTP 5xx / connection error:** Transient error. Event publish fails; RabbitMQ message nacked/requeued.
+- **Timeout (>5s):** httpx raises `TimeoutException`. Caught by `EventPublisher`, exception propagated to caller (message rejected and dead-lettered to the service DLQ).
+- **HTTP 5xx / connection error:** Transient error. Event publish fails; message rejected and dead-lettered to the service DLQ.
 - **event-receiver fully down for extended period:** Notifications and audit events accumulate in memory; if publishing queue grows unbounded, memory pressure may increase.
 
 Reference: `config.py:26-30`, `adapters/events.py:1-60`, `ioc.py`
@@ -111,21 +111,24 @@ Reference: `config.py:38-41`, `adapters/get_stream.py:1-100`, `controllers/chat.
 |----------|-------|
 | Role | Generate JWT tokens for meeting authentication |
 | Protocol | Local JWT encoding (no HTTP calls to Jitsi) |
-| Config | `JITSI_JWT_SECRET`, `JITSI_JWT_AUD`, `JITSI_JWT_ISS`, `MEETING_HOST_URL` |
+| Config | `JITSI_JWT_SECRET`, `JITSI_JWT_AUD`, `JITSI_JWT_ISS`, `JITSI_JWT_SUB`, `MEETING_HOST_URL` |
 | Client | PyJWT library |
 | Connection lifetime | Stateless (no connection) |
 
 **JWT claims:**
 - `aud` (audience): from config `JITSI_JWT_AUD`
 - `iss` (issuer): from config `JITSI_JWT_ISS`
-- `sub` (subject): booking UID
-- `exp` (expiration): ~24 hours from creation
+- `sub` (subject): fixed tenant/domain from `JITSI_JWT_SUB` (never the wildcard `*`)
+- `room`: booking UID
+- `nbf`: booking start_time - 5 min buffer
+- `exp` (expiration): booking end_time + 5 min buffer
+- `context.user`: `{name, email, role, moderator}` — `moderator: true` for the organizer only
 
 **Failure modes:**
 - **Invalid JWT secret:** JWT tokens generated but will be rejected by Jitsi server. No local validation; failures only discovered when clients attempt to join meeting.
 - **JWT library not available:** Service fails to start (import error).
 
-Reference: `config.py:32-36`, `adapters/jitsi.py:1-50`, `controllers/meeting.py`
+Reference: `config.py`, `controllers/meeting.py` (no adapters/jitsi.py — JWT is minted in the meeting controller)
 
 ---
 

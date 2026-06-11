@@ -90,7 +90,7 @@ Reference: `consumer.py:15-22`
 ### Events Published via event-receiver
 
 After processing a booking event, event-booking publishes the following events
-to event-receiver's `POST /event/cloudevents` endpoint. All events are published
+to event-receiver's `POST /event/booking` endpoint. All events are published
 with `source: "booking"` and appropriate `type` and `data` fields.
 
 #### Constraints Violation Events
@@ -99,13 +99,20 @@ with `source: "booking"` and appropriate `type` and `data` fields.
 
 **Published when:** `IS_ENABLE_BOOKING_CONSTRAINTS=true` and constraint analysis fails.
 
-**Payload schema:**
+**Payload schema (canonical `BookingRejectedPayload`):**
 ```json
 {
-  "booking_uid": "string (UUID)",
-  "rejection_reasons": ["string", ...]
+  "booking_uid": "string (cal.com uid)",
+  "client_email": "client@example.com",
+  "rejection_type": "active_booking | month_limit | year_limit | min_interval | null",
+  "rejection_reasons": ["string", ...],
+  "has_active_booking": false,
+  "available_from": "ISO datetime (optional)",
+  "active_booking_start": "ISO datetime (optional)"
 }
 ```
+
+The cal.com row is marked `status='rejected'` with `rejectionReason` — cal.com rows are never DELETEd.
 
 **Destination:** Routed by event-receiver with routing key `events.booking.lifecycle` (fan-out to `.saver` / `.booking` queues).
 **Consumers:** event-saver (audit), event-notifier (via routing rules).
@@ -120,26 +127,27 @@ Reference: `controllers/booking.py:54-60`
 
 **Published when:** After successful processing (chat + meeting URL created, or booking rescheduled/reassigned/cancelled).
 
-**Payload schema (booking.created/rescheduled/reassigned/cancelled):**
+One command is published **per recipient**; each carries that recipient's OWN
+tokenized `meeting_url` (the organizer's moderator URL is never sent to the client).
+
+**Payload schema (canonical `NotificationCommandPayload`):**
 ```json
 {
-  "booking_uid": "string (UUID)",
-  "trigger_event": "BOOKING_CREATED | BOOKING_RESCHEDULED | BOOKING_REASSIGNED | BOOKING_CANCELLED",
+  "booking_uid": "string (cal.com uid)",
+  "booking_id": "string (cal.com uid)",
+  "trigger_event": "BOOKING_CREATED | BOOKING_RESCHEDULED | BOOKING_REASSIGNED | BOOKING_CANCELLED | BOOKING_REMINDER | BOOKING_REJECTED",
   "recipients": [
-    {
-      "user_id": "uuid",
-      "role": "organizer | client"
-    },
-    ...
+    {"email": "client@example.com", "role": "organizer | client"}
   ],
   "template_data": {
-    "booking_id": "uuid",
-    "start_time": "2026-05-15T14:00:00Z",
-    "end_time": "2026-05-15T15:00:00Z",
-    "organizer_email": "organizer@example.com",
-    "client_email": "client@example.com",
-    "meeting_url": "https://short.link/abc123",
-    ...
+    "booking_uid": "uid",
+    "start_time": "2026-05-15T14:00:00+00:00",
+    "end_time": "2026-05-15T15:00:00+00:00",
+    "title": "string",
+    "organizer_name": "...", "organizer_email": "...", "organizer_time_zone": "...",
+    "client_name": "...", "client_email": "...", "client_time_zone": "...",
+    "meeting_url": "https://short.link/abc123 (this recipient's own URL)",
+    "previous_start_time | previous_organizer_email | cancellation_reason": "(per trigger)"
   }
 }
 ```
@@ -157,18 +165,19 @@ Reference: `controllers/booking.py:100-150`, `adapters/events.py`
 
 **Published when:** After successful Jitsi JWT + Shortify URL generation.
 
-**Payload schema:**
+**Payload schema (canonical `MeetingUrlCreatedPayload`):**
 ```json
 {
-  "booking_uid": "string (UUID)",
-  "meeting_url": "string (shortened URL)",
-  "recipient_role": "organizer | client"
+  "booking_uid": "string (cal.com uid)",
+  "email": "participant@example.com",
+  "recipient_role": "organizer | client",
+  "meeting_url": "string (shortened URL)"
 }
 ```
 
-**Destination:** Routed to `events.notification.delivery` queue.
+**Destination:** routing key `events.meeting.lifecycle` (see event-receiver routing).
 
-Reference: `controllers/meeting.py:50-60`
+Reference: `controllers/meeting.py`
 
 ---
 
@@ -176,17 +185,18 @@ Reference: `controllers/meeting.py:50-60`
 
 **Published when:** On booking cancellation.
 
-**Payload schema:**
+**Payload schema (canonical `MeetingUrlDeletedPayload`):**
 ```json
 {
-  "booking_uid": "string (UUID)",
+  "booking_uid": "string (cal.com uid)",
+  "email": "participant@example.com",
   "recipient_role": "organizer | client"
 }
 ```
 
-**Destination:** Routed to `events.notification.delivery` queue.
+**Destination:** routing key `events.meeting.lifecycle` (see event-receiver routing).
 
-Reference: `controllers/booking.py:130-140`
+Reference: `controllers/meeting.py`
 
 ---
 
@@ -194,18 +204,17 @@ Reference: `controllers/booking.py:130-140`
 
 **Published when:** After GetStream chat channel is successfully created.
 
-**Payload schema:**
+**Payload schema (canonical `ChatCreatedPayload`):**
 ```json
 {
-  "booking_uid": "string (UUID)",
-  "organizer_id": "uuid",
-  "client_id": "uuid"
+  "booking_uid": "string (cal.com uid)",
+  "channel_id": "string (== booking uid)"
 }
 ```
 
-**Destination:** Routed to `events.notification.delivery` queue.
+**Destination:** routing key `events.chat.lifecycle` (see event-receiver routing).
 
-Reference: `controllers/chat.py:40-60`
+Reference: `controllers/chat.py`
 
 ---
 
@@ -213,16 +222,17 @@ Reference: `controllers/chat.py:40-60`
 
 **Published when:** On booking cancellation or reassignment.
 
-**Payload schema:**
+**Payload schema (canonical `ChatDeletedPayload`):**
 ```json
 {
-  "booking_uid": "string (UUID)"
+  "booking_uid": "string (cal.com uid)",
+  "channel_id": "string (== booking uid)"
 }
 ```
 
-**Destination:** Routed to `events.notification.delivery` queue.
+**Destination:** routing key `events.chat.lifecycle` (see event-receiver routing).
 
-Reference: `controllers/booking.py:135-145`
+Reference: `controllers/chat.py`
 
 ---
 
@@ -232,13 +242,17 @@ Reference: `controllers/booking.py:135-145`
 
 **Published when:** Background scheduler detects a booking 55-65 minutes before start.
 
-**Payload schema:**
+**Payload schema (canonical `BookingReminderSentPayload`):**
 ```json
 {
-  "booking_uid": "string (UUID)",
-  "trigger_event": "BOOKING_REMINDER"
+  "booking_uid": "string (cal.com uid)",
+  "email": "client@example.com"
 }
 ```
+
+A `notification.send_requested` with `trigger_event=BOOKING_REMINDER` is published
+alongside. Duplicate protection: persistent `bookingReminderSentAt` marker in
+cal.com `Booking.metadata` plus a deterministic `reminder:{uid}` dedupe key.
 
 **Destination:** Routed by event-receiver with routing key `events.booking.lifecycle` (fan-out to `.saver` / `.booking` queues).
 **Consumers:** event-saver (audit), event-notifier (sends reminder messages).
@@ -249,10 +263,10 @@ Reference: `scheduler.py:30-80`
 
 ## Event Publishing Configuration
 
-All events are published via HTTP `POST /event/cloudevents` to event-receiver.
+All events are published via HTTP `POST /event/booking` to event-receiver.
 
 **Authentication:**
-- Header: `Authorization: Bearer {EVENTS_API_KEY}`
+- Header: `Authorization: {EVENTS_API_KEY} (raw API key, no Bearer prefix)`
 - Key stored in config: `EVENTS_API_KEY`
 
 **Timeout:**
@@ -260,7 +274,7 @@ All events are published via HTTP `POST /event/cloudevents` to event-receiver.
 
 **Failure handling:**
 - If event-receiver returns HTTP error or request times out, exception is logged and propagated to RabbitMQ consumer
-- RabbitMQ message is nacked and requeued for retry
+- the message is rejected and dead-lettered to `events.booking.lifecycle.booking.dlq` (24h TTL); DLQ replay resumes idempotently via deterministic dedupe keys
 
 **Implementation:** `adapters/events.py:1-60`
 
@@ -286,24 +300,24 @@ All events are published via HTTP `POST /event/cloudevents` to event-receiver.
 
 ### Constraint analysis determines rejection
 
-- **Behavior:** `notification.send_requested` published with `BOOKING_REJECTED` trigger; booking deleted from database
+- **Behavior:** `notification.send_requested` published with `BOOKING_REJECTED` trigger; cal.com booking marked `status='rejected'` (never deleted)
 - **Reference:** `controllers/booking.py:49-60`
 
 ### GetStream chat creation fails
 
-- **Behavior:** Exception propagates to consumer; RabbitMQ message nacked/requeued
+- **Behavior:** Exception propagates to consumer; message rejected and dead-lettered to the service DLQ
 - **Impact:** Booking is not processed; no notification sent
 - **Reference:** `controllers/chat.py:20-90`
 
 ### Meeting URL generation fails (Jitsi or Shortify)
 
-- **Behavior:** Exception propagates to consumer; RabbitMQ message nacked/requeued
+- **Behavior:** Exception propagates to consumer; message rejected and dead-lettered to the service DLQ
 - **Impact:** Booking has no meeting URL; notification not sent
 - **Reference:** `controllers/meeting.py:10-80`
 
 ### Event publishing to event-receiver fails
 
-- **Behavior:** Exception raised; propagates to consumer; RabbitMQ message nacked/requeued
+- **Behavior:** Exception raised; propagates to consumer; message rejected and dead-lettered to the service DLQ
 - **Impact:** Audit/notification events not published; downstream services miss update
 - **Reference:** `adapters/events.py:50-60`
 
