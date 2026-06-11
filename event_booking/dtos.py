@@ -38,6 +38,14 @@ class BookingDTO:
 
 
 @dataclass(frozen=True, slots=True)
+class MeetingUrls:
+    """Per-participant tokenized meeting URLs; never deliver one role's URL to the other."""
+
+    organizer: str | None = None
+    client: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AttendeeBookingDTO:
     booking_id: int
     booking_uid: str

@@ -1,4 +1,9 @@
-"""Meeting controller: Jitsi JWT generation and URL shortening."""
+"""Meeting controller: Jitsi JWT generation and URL shortening.
+
+Each participant (organizer, client) gets their OWN tokenized meeting URL:
+the JWT identifies the participant and grants moderator rights to the
+organizer only. Organizer URLs must never be delivered to clients.
+"""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -9,13 +14,14 @@ from event_schemas.types import EventType
 
 from event_booking.dtos import BookingDTO
 from event_booking.interfaces.chat import IChatClient
-from event_booking.interfaces.db import IBookingDatabaseAdapter
 from event_booking.interfaces.events import IEventPublisher
 from event_booking.interfaces.shortener import IUrlShortener
 
 logger = structlog.get_logger(__name__)
 
 BUFFER_MINUTES = 5
+ORGANIZER_ROLE = "organizer"
+CLIENT_ROLE = "client"
 
 
 class MeetingController:
@@ -24,20 +30,20 @@ class MeetingController:
         *,
         shortener: IUrlShortener,
         chat_client: IChatClient,
-        db: IBookingDatabaseAdapter,
         events: IEventPublisher,
         jitsi_jwt_secret: str,
         jitsi_jwt_aud: str,
         jitsi_jwt_iss: str,
+        jitsi_jwt_sub: str,
         meeting_host_url: str,
     ) -> None:
         self._shortener = shortener
         self._chat_client = chat_client
-        self._db = db
         self._events = events
         self._jitsi_jwt_secret = jitsi_jwt_secret
         self._jitsi_jwt_aud = jitsi_jwt_aud
         self._jitsi_jwt_iss = jitsi_jwt_iss
+        self._jitsi_jwt_sub = jitsi_jwt_sub
         self._meeting_host_url = meeting_host_url.rstrip("/")
 
     def _get_not_before(self, start_time: datetime) -> float:
@@ -57,7 +63,7 @@ class MeetingController:
         payload: dict[str, Any] = {
             "aud": self._jitsi_jwt_aud,
             "iss": self._jitsi_jwt_iss,
-            "sub": "*",
+            "sub": self._jitsi_jwt_sub,
             "room": booking.uid,
             "iat": int(now.timestamp()),
             "nbf": int(self._get_not_before(booking.start_time)),
@@ -66,6 +72,8 @@ class MeetingController:
                 "user": {
                     "name": participant_name,
                     "role": role,
+                    # Jitsi-recognized claim: only the organizer moderates the room.
+                    "moderator": role == ORGANIZER_ROLE,
                     "email": participant_email,
                 },
             },
@@ -88,35 +96,67 @@ class MeetingController:
         )
         return f"{self._meeting_host_url}/{booking.uid}?jwt_video={jwt_video}&jwt_chat={jwt_chat}"
 
-    async def create_meeting_url(
+    async def _resolve_short_url(
+        self,
+        *,
+        long_url: str,
+        expires_at: float,
+        not_before: float,
+        external_id: str,
+        old_external_id: str | None,
+    ) -> str | None:
+        if old_external_id is None:
+            return await self._shortener.create_url(long_url, expires_at, not_before, external_id)
+
+        updated = await self._shortener.update_url_data(
+            long_url=long_url,
+            expires_at=expires_at,
+            not_before=not_before,
+            new_external_id=external_id,
+            old_external_id=old_external_id,
+        )
+        if updated is not None:
+            return updated
+        # The old short URL no longer exists (or was never created) — fall back to creating a fresh one.
+        return await self._shortener.create_url(long_url, expires_at, not_before, external_id)
+
+    async def create_meeting_url(  # noqa: PLR0913
         self,
         booking: BookingDTO,
         participant_name: str,
         participant_email: str,
-        is_update_url_data: bool = False,
         external_id_prefix: str = "",
+        previous_booking_uid: str | None = None,
+        replace_existing: bool = False,
+        dedupe_key: str | None = None,
     ) -> str:
-        role = "client" if external_id_prefix else "organizer"
+        """Create the participant's short meeting URL.
+
+        - ``previous_booking_uid``: reschedule — move the old booking's short URL
+          onto the new uid (old links keep working and point at the new room).
+        - ``replace_existing``: reassign — regenerate tokens in place under the
+          same external id.
+        """
+        role = CLIENT_ROLE if external_id_prefix else ORGANIZER_ROLE
         long_url = await self._generate_long_url(booking, participant_name, participant_email, role)
 
         not_before = self._get_not_before(booking.start_time)
         expires_at = self._get_expiration(booking.end_time)
-        external_id = f"{external_id_prefix}{booking.uid}" if external_id_prefix else booking.uid
+        external_id = f"{external_id_prefix}{booking.uid}"
 
-        short_url: str | None = None
-        if is_update_url_data and booking.from_reschedule:
-            old_external_id = (
-                f"{external_id_prefix}{booking.from_reschedule}" if external_id_prefix else booking.from_reschedule
-            )
-            short_url = await self._shortener.update_url_data(
-                long_url=long_url,
-                expires_at=expires_at,
-                not_before=not_before,
-                new_external_id=external_id,
-                old_external_id=old_external_id,
-            )
-        else:
-            short_url = await self._shortener.create_url(long_url, expires_at, not_before, external_id)
+        old_external_id: str | None = None
+        if previous_booking_uid:
+            old_external_id = f"{external_id_prefix}{previous_booking_uid}"
+        if replace_existing:
+            old_external_id = external_id
+
+        short_url = await self._resolve_short_url(
+            long_url=long_url,
+            expires_at=expires_at,
+            not_before=not_before,
+            external_id=external_id,
+            old_external_id=old_external_id,
+        )
 
         # Canonical MeetingUrlCreatedPayload: {email, recipient_role, meeting_url}
         await self._events.send_event(
@@ -127,15 +167,21 @@ class MeetingController:
                 "recipient_role": role,
                 "meeting_url": short_url or long_url,
             },
+            dedupe_key=dedupe_key,
         )
 
         return short_url or long_url
 
-    async def delete_meeting_url(self, booking: BookingDTO, external_id_prefix: str = "") -> None:
-        external_id = f"{external_id_prefix}{booking.uid}" if external_id_prefix else booking.uid
+    async def delete_meeting_url(
+        self,
+        booking: BookingDTO,
+        external_id_prefix: str = "",
+        dedupe_key: str | None = None,
+    ) -> None:
+        external_id = f"{external_id_prefix}{booking.uid}"
         await self._shortener.delete_url(external_id=external_id)
 
-        role = "client" if external_id_prefix else "organizer"
+        role = CLIENT_ROLE if external_id_prefix else ORGANIZER_ROLE
         participant = booking.client if external_id_prefix else booking.user
         if not participant:
             logger.warning(
@@ -150,4 +196,5 @@ class MeetingController:
             booking_uid=booking.uid,
             event=EventType.MEETING_URL_DELETED,
             data={"email": participant.email, "recipient_role": role},
+            dedupe_key=dedupe_key,
         )

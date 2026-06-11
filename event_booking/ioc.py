@@ -2,11 +2,12 @@
 
 Scope layout:
 - APP: settings, engine, sessionmaker, broker, HTTP publisher, GetStream/shortener
-  adapters and the stateless controllers built on them.
+  adapters and the stateless controllers built on them (ChatController,
+  MeetingController).
 - REQUEST: AsyncSession and everything that touches it (SqlExecutor, db adapter,
-  MeetingController, BookingController). The consumer opens one REQUEST scope per
-  RabbitMQ message; the scheduler opens one per poll tick. Sessions are never
-  shared across concurrent work units.
+  BookingController). The consumer opens one REQUEST scope per RabbitMQ message;
+  the scheduler opens one per poll tick. Sessions are never shared across
+  concurrent work units.
 """
 
 from collections.abc import AsyncIterator
@@ -110,23 +111,22 @@ class AppProvider(Provider):
     def get_constraints_analyzer(self) -> IBookingConstraintsAnalyzer:
         return _ConstraintsAnalyzerAdapter()  # type: ignore[return-value]
 
-    @provide(scope=Scope.REQUEST)
+    @provide
     def get_meeting_controller(
         self,
         shortener: UrlShortenerAdapter,
         chat_client: GetStreamAdapter,
-        db: BookingDatabaseAdapter,
         events: EventPublisher,
         settings: Settings,
     ) -> MeetingController:
         return MeetingController(
             shortener=shortener,
             chat_client=chat_client,
-            db=db,
             events=events,
             jitsi_jwt_secret=settings.jitsi_jwt_secret,
             jitsi_jwt_aud=settings.jitsi_jwt_aud,
             jitsi_jwt_iss=settings.jitsi_jwt_iss,
+            jitsi_jwt_sub=settings.jitsi_jwt_sub,
             meeting_host_url=settings.meeting_host_url,
         )
 

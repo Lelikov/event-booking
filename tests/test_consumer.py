@@ -17,8 +17,8 @@ def make_consumer() -> tuple[BookingConsumer, AsyncMock]:
 class TestDispatch:
     async def test_dispatches_created(self) -> None:
         consumer, ctrl = make_consumer()
-        await consumer.dispatch(ctrl, EventType.BOOKING_CREATED.value, "uid-1", {})
-        ctrl.handle_created.assert_awaited_once_with("uid-1")
+        await consumer.dispatch(ctrl, EventType.BOOKING_CREATED.value, "uid-1", {}, "ce-1")
+        ctrl.handle_created.assert_awaited_once_with("uid-1", ce_id="ce-1")
         ctrl.handle_cancelled.assert_not_awaited()
         ctrl.handle_rescheduled.assert_not_awaited()
         ctrl.handle_reassigned.assert_not_awaited()
@@ -26,25 +26,34 @@ class TestDispatch:
     async def test_dispatches_cancelled(self) -> None:
         consumer, ctrl = make_consumer()
         data = {"cancellation_reason": "Client request"}
-        await consumer.dispatch(ctrl, EventType.BOOKING_CANCELLED.value, "uid-2", data)
-        ctrl.handle_cancelled.assert_awaited_once_with("uid-2", cancellation_reason="Client request")
+        await consumer.dispatch(ctrl, EventType.BOOKING_CANCELLED.value, "uid-2", data, "ce-2")
+        ctrl.handle_cancelled.assert_awaited_once_with("uid-2", cancellation_reason="Client request", ce_id="ce-2")
 
     async def test_dispatches_cancelled_without_reason(self) -> None:
         consumer, ctrl = make_consumer()
         await consumer.dispatch(ctrl, EventType.BOOKING_CANCELLED.value, "uid-3", {})
-        ctrl.handle_cancelled.assert_awaited_once_with("uid-3", cancellation_reason=None)
+        ctrl.handle_cancelled.assert_awaited_once_with("uid-3", cancellation_reason=None, ce_id="")
 
-    async def test_dispatches_rescheduled(self) -> None:
+    async def test_dispatches_rescheduled_with_previous_booking_uid(self) -> None:
         consumer, ctrl = make_consumer()
-        data = {"previous_start_time": "2026-06-01T10:00:00+00:00"}
-        await consumer.dispatch(ctrl, EventType.BOOKING_RESCHEDULED.value, "uid-4", data)
-        ctrl.handle_rescheduled.assert_awaited_once_with("uid-4", previous_start_time="2026-06-01T10:00:00+00:00")
+        data = {"previous_start_time": "2026-06-01T10:00:00+00:00", "previous_booking_uid": "old-uid"}
+        await consumer.dispatch(ctrl, EventType.BOOKING_RESCHEDULED.value, "uid-4", data, "ce-4")
+        ctrl.handle_rescheduled.assert_awaited_once_with(
+            "uid-4",
+            previous_start_time="2026-06-01T10:00:00+00:00",
+            previous_booking_uid="old-uid",
+            ce_id="ce-4",
+        )
 
     async def test_dispatches_reassigned(self) -> None:
         consumer, ctrl = make_consumer()
         data = {"previous_organizer_email": "old@test.com"}
-        await consumer.dispatch(ctrl, EventType.BOOKING_REASSIGNED.value, "uid-5", data)
-        ctrl.handle_reassigned.assert_awaited_once_with("uid-5", previous_organizer_email="old@test.com")
+        await consumer.dispatch(ctrl, EventType.BOOKING_REASSIGNED.value, "uid-5", data, "ce-5")
+        ctrl.handle_reassigned.assert_awaited_once_with(
+            "uid-5",
+            previous_organizer_email="old@test.com",
+            ce_id="ce-5",
+        )
 
     async def test_ignores_unknown_event(self) -> None:
         consumer, ctrl = make_consumer()

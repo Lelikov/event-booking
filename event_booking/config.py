@@ -29,10 +29,11 @@ class Settings(BaseSettings):
     events_source: str = "booking"
     events_timeout_seconds: float = 5.0
 
-    # Jitsi JWT
+    # Jitsi JWT. sub must be the fixed tenant/domain — never the wildcard '*'.
     jitsi_jwt_secret: str = Field(strict=True)
     jitsi_jwt_aud: str = Field(strict=True)
     jitsi_jwt_iss: str = Field(strict=True)
+    jitsi_jwt_sub: str = Field(strict=True)
     meeting_host_url: str = "http://localhost:8080"
 
     # GetStream Chat
