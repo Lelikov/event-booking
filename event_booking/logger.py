@@ -18,7 +18,9 @@ def setup_logging(log_level: str = "INFO", *, json: bool = False) -> None:
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
+            # NOTE: structlog.stdlib.add_logger_name is incompatible with
+            # PrintLoggerFactory (PrintLogger has no .name) — it crashes on
+            # the first log call. Logger names are not emitted.
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
