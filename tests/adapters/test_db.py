@@ -250,5 +250,5 @@ class TestJsonbBuildObjectParamsAreCast:
         assert sql_constants
         for name, sql in sql_constants.items():
             for call in re.findall(r"jsonb_build_object\(([^)]*)\)", sql):
-                for param in re.findall(r"(?<!CAST\():\w+", call):
-                    raise AssertionError(f"{name}: uncast bind param {param} inside jsonb_build_object")
+                uncast = re.findall(r"(?<!CAST\():\w+", call)
+                assert not uncast, f"{name}: uncast bind params {uncast} inside jsonb_build_object"
