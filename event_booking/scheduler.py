@@ -5,9 +5,10 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from dishka import AsyncContainer
-from event_schemas.types import TriggerEvent
+from event_schemas.types import EventType, TriggerEvent
 
 from event_booking.adapters.db import BookingDatabaseAdapter
+from event_booking.dtos import BookingDTO
 from event_booking.interfaces.events import IEventPublisher
 
 logger = structlog.get_logger(__name__)
@@ -41,6 +42,15 @@ class ReminderScheduler:
             return await self._send_reminders(db)
 
     async def _send_reminders(self, db: BookingDatabaseAdapter) -> int:
+        """Send at most one reminder per booking.
+
+        Duplicate protection is layered: get_bookings excludes bookings whose
+        cal.com metadata already carries the persistent reminder marker (the
+        10-minute window is polled every 5 minutes, so every booking is seen
+        twice); the marker is written right after sending; and the notification
+        command carries a deterministic per-booking dedupe key so even a crash
+        between send and mark cannot duplicate the delivered notification.
+        """
         now = datetime.now(UTC)
         start_from = now + timedelta(minutes=self._shift_from_minutes)
         start_to = now + timedelta(minutes=self._shift_to_minutes)
@@ -48,36 +58,51 @@ class ReminderScheduler:
         bookings = await db.get_bookings(start_time_from=start_from, start_time_to=start_to)
         count = 0
         for booking in bookings:
-            recipients = []
-            if booking.user:
-                recipients.append({"email": booking.user.email, "role": "organizer"})
-            if booking.client:
-                recipients.append({"email": booking.client.email, "role": "client"})
-
-            template_data: dict = {
-                "booking_uid": booking.uid,
-                "start_time": booking.start_time.isoformat(),
-                "end_time": booking.end_time.isoformat(),
-                "title": booking.title,
-            }
-            if booking.user:
-                template_data["organizer_name"] = booking.user.name
-                template_data["organizer_email"] = booking.user.email
-            if booking.client:
-                template_data["client_name"] = booking.client.name
-                template_data["client_email"] = booking.client.email
-
-            await self._events.send_notification_command(
-                booking_uid=booking.uid,
-                trigger_event=TriggerEvent.BOOKING_REMINDER.value,
-                recipients=recipients,
-                template_data=template_data,
-            )
+            await self._send_reminder(booking)
+            await db.mark_reminder_sent(booking.uid, sent_at=now)
             count += 1
 
         if count:
             logger.info("Reminders sent", count=count)
         return count
+
+    async def _send_reminder(self, booking: BookingDTO) -> None:
+        recipients = []
+        if booking.user:
+            recipients.append({"email": booking.user.email, "role": "organizer"})
+        if booking.client:
+            recipients.append({"email": booking.client.email, "role": "client"})
+
+        template_data: dict = {
+            "booking_uid": booking.uid,
+            "start_time": booking.start_time.isoformat(),
+            "end_time": booking.end_time.isoformat(),
+            "title": booking.title,
+        }
+        if booking.user:
+            template_data["organizer_name"] = booking.user.name
+            template_data["organizer_email"] = booking.user.email
+        if booking.client:
+            template_data["client_name"] = booking.client.name
+            template_data["client_email"] = booking.client.email
+
+        await self._events.send_notification_command(
+            booking_uid=booking.uid,
+            trigger_event=TriggerEvent.BOOKING_REMINDER.value,
+            recipients=recipients,
+            template_data=template_data,
+            dedupe_key=f"reminder:{booking.uid}",
+        )
+
+        if not booking.client:
+            return
+        # Canonical BookingReminderSentPayload: {email, client_id?}; routed to events.booking.lifecycle.
+        await self._events.send_event(
+            booking_uid=booking.uid,
+            event=EventType.BOOKING_REMINDER_SENT,
+            data={"email": booking.client.email},
+            dedupe_key=f"reminder_sent:{booking.uid}",
+        )
 
     async def run_forever(self) -> None:
         """Background loop: sleep, then send reminders, repeat until stopped."""
