@@ -6,20 +6,32 @@ This service has a minimal HTTP API:
 
 ### `GET /health`
 
-**Purpose:** Health check endpoint for load balancers and orchestrators.
-
-**Request:**
-```
-GET /health HTTP/1.1
-Host: localhost:8000
-```
+**Purpose:** Liveness probe (k8s `livenessProbe`). Confirms the process serves HTTP; never calls dependencies.
 
 **Response (200 OK):**
 ```json
 {"status": "ok"}
 ```
 
-**Implementation:** `main.py:59-61`
+**Implementation:** `main.py`
+
+---
+
+### `GET /ready`
+
+**Purpose:** Readiness probe (k8s `readinessProbe`). Verifies the critical dependencies: cal.com PostgreSQL (`SELECT 1`) and the RabbitMQ connection (broker ping, 5s timeout).
+
+**Response (200 OK):**
+```json
+{"status": "ready", "checks": {"database": true, "rabbitmq": true}}
+```
+
+**Response (503 Service Unavailable):**
+```json
+{"status": "not_ready", "checks": {"database": false, "rabbitmq": true}}
+```
+
+**Implementation:** `main.py`
 
 ---
 

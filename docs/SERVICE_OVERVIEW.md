@@ -57,7 +57,7 @@ ReminderScheduler                         (scheduler.py)
 
 ## NOT Responsible For
 
-- HTTP API (no external API beyond `/health` endpoint)
+- HTTP API (no external API beyond the `/health` liveness and `/ready` readiness probes)
 - User account management (handled by event-users)
 - Transactional email sending (handled by event-notifier)
 - Database migrations (not yet implemented; schema is pre-created in Cal.com)
