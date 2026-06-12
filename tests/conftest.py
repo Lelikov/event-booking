@@ -55,3 +55,10 @@ def mock_constraints_analyzer() -> MagicMock:
     mock = MagicMock()
     mock.analyze_on_create = MagicMock(return_value=ConstraintsResult(is_allowed=True))
     return mock
+
+
+@pytest.fixture
+def mock_blacklist_checker() -> AsyncMock:
+    mock = AsyncMock()
+    mock.is_blacklisted = AsyncMock(return_value=False)
+    return mock

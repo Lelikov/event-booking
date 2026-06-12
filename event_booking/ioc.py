@@ -12,10 +12,12 @@ Scope layout:
 
 from collections.abc import AsyncIterator
 
+import structlog
 from dishka import AsyncContainer, Provider, Scope, provide
 from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
+from event_booking.adapters.blacklist import BlacklistClient
 from event_booking.adapters.db import BookingDatabaseAdapter
 from event_booking.adapters.events import EventPublisher
 from event_booking.adapters.get_stream import GetStreamAdapter
@@ -28,10 +30,33 @@ from event_booking.controllers.chat import ChatController
 from event_booking.controllers.constraints import analyze_on_create
 from event_booking.controllers.meeting import MeetingController
 from event_booking.dtos import AttendeeBookingDTO, BookingDTO, ConstraintsResult
+from event_booking.interfaces.blacklist import IBlacklistChecker
 from event_booking.interfaces.constraints import IBookingConstraintsAnalyzer
 from event_booking.scheduler import ReminderScheduler
 
+logger = structlog.get_logger(__name__)
+
 BROKER_GRACEFUL_TIMEOUT_SECONDS = 30.0
+
+
+def _blacklist_enabled(settings: Settings) -> bool:
+    """Resolve the effective blacklist switch; never crash when event-admin is absent."""
+    if not settings.blacklist_enabled:
+        logger.info("Booking blacklist disabled via BLACKLIST_ENABLED=false")
+        return False
+    if not settings.event_admin_api_url:
+        logger.warning(
+            "Booking blacklist disabled: EVENT_ADMIN_API_URL is not configured "
+            "(set it together with BLACKLIST_SERVICE_TOKEN to enable the check)",
+        )
+        return False
+    if not settings.blacklist_service_token:
+        logger.warning(
+            "Booking blacklist disabled: BLACKLIST_SERVICE_TOKEN is not configured "
+            "(EVENT_ADMIN_API_URL is set but the service token is missing)",
+        )
+        return False
+    return True
 
 
 class _ConstraintsAnalyzerAdapter:
@@ -113,6 +138,17 @@ class AppProvider(Provider):
         return _ConstraintsAnalyzerAdapter()  # type: ignore[return-value]
 
     @provide
+    def get_blacklist_checker(self, settings: Settings) -> IBlacklistChecker:
+        # APP scope: the in-memory TTL cache of active values must outlive single messages.
+        return BlacklistClient(  # type: ignore[return-value]
+            api_url=settings.event_admin_api_url,
+            service_token=settings.blacklist_service_token,
+            cache_ttl_seconds=settings.blacklist_cache_ttl,
+            timeout_seconds=settings.blacklist_timeout_seconds,
+            enabled=_blacklist_enabled(settings),
+        )
+
+    @provide
     def get_meeting_controller(
         self,
         shortener: UrlShortenerAdapter,
@@ -139,6 +175,7 @@ class AppProvider(Provider):
         chat_controller: ChatController,
         meeting_controller: MeetingController,
         constraints_analyzer: IBookingConstraintsAnalyzer,
+        blacklist_checker: IBlacklistChecker,
         settings: Settings,
     ) -> BookingController:
         return BookingController(
@@ -147,6 +184,7 @@ class AppProvider(Provider):
             chat_controller=chat_controller,
             meeting_controller=meeting_controller,
             constraints_analyzer=constraints_analyzer,
+            blacklist_checker=blacklist_checker,
             is_enable_constraints=settings.is_enable_booking_constraints,
         )
 

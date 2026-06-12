@@ -51,6 +51,16 @@ class Settings(BaseSettings):
     # Booking constraints
     is_enable_booking_constraints: bool = False
 
+    # Booking blacklist (read from event-admin's /api/blacklist/active).
+    # When EVENT_ADMIN_API_URL or BLACKLIST_SERVICE_TOKEN is unset the check is
+    # disabled with a startup warning — booking must keep working in
+    # deployments without event-admin.
+    blacklist_enabled: bool = True
+    event_admin_api_url: str | None = None
+    blacklist_service_token: str | None = None
+    blacklist_cache_ttl: float = 300.0
+    blacklist_timeout_seconds: float = 5.0
+
     # Reminder scheduler
     reminder_interval_seconds: int = 300
     reminder_shift_from_minutes: int = 55

@@ -109,14 +109,14 @@ with `source: "booking"` and appropriate `type` and `data` fields.
 
 **Event Type:** `booking.rejected`
 
-**Published when:** `IS_ENABLE_BOOKING_CONSTRAINTS=true` and constraint analysis fails.
+**Published when:** the client email matches an effective blacklist entry (`rejection_type='blacklisted'`; checked before constraints), or `IS_ENABLE_BOOKING_CONSTRAINTS=true` and constraint analysis fails.
 
 **Payload schema (canonical `BookingRejectedPayload`):**
 ```json
 {
   "booking_uid": "string (cal.com uid)",
   "client_email": "client@example.com",
-  "rejection_type": "active_booking | month_limit | year_limit | min_interval | null",
+  "rejection_type": "blacklisted | active_booking | month_limit | year_limit | min_interval | null",
   "rejection_reasons": ["string", ...],
   "has_active_booking": false,
   "available_from": "ISO datetime (optional)",
@@ -147,7 +147,7 @@ tokenized `meeting_url` (the organizer's moderator URL is never sent to the clie
 {
   "booking_uid": "string (cal.com uid)",
   "booking_id": "string (cal.com uid)",
-  "trigger_event": "BOOKING_CREATED | BOOKING_RESCHEDULED | BOOKING_REASSIGNED | BOOKING_CANCELLED | BOOKING_REMINDER | BOOKING_REJECTED",
+  "trigger_event": "BOOKING_CREATED | BOOKING_RESCHEDULED | BOOKING_REASSIGNED | BOOKING_CANCELLED | BOOKING_REMINDER | BOOKING_REJECTED | BOOKING_REJECTED_BLACKLISTED",
   "recipients": [
     {"email": "client@example.com", "role": "organizer | client", "locale": "ru (optional; cal.com users.locale / Attendee.locale)"}
   ],
@@ -314,6 +314,12 @@ All events are published via HTTP `POST /event/booking` to event-receiver.
 
 - **Behavior:** `notification.send_requested` published with `BOOKING_REJECTED` trigger; cal.com booking marked `status='rejected'` (never deleted)
 - **Reference:** `controllers/booking.py:49-60`
+
+### Client email matches the blacklist (checked before constraints)
+
+- **Behavior:** same rejection flow with `rejection_type='blacklisted'` and `notification.send_requested` trigger `BOOKING_REJECTED_BLACKLISTED`; client-facing text and cal.com `rejectionReason` never mention the blacklist
+- **Availability:** active set fetched from event-admin `GET /api/blacklist/active` (static `BLACKLIST_SERVICE_TOKEN`), cached in memory for `BLACKLIST_CACHE_TTL`; stale cache on refresh failure; **fail-open** (treated as not blacklisted, error logged) when the API is down and no cache exists; disabled with a startup warning when `EVENT_ADMIN_API_URL`/`BLACKLIST_SERVICE_TOKEN` are unset
+- **Reference:** `adapters/blacklist.py`, `controllers/booking.py` (`handle_created`)
 
 ### GetStream chat creation fails
 

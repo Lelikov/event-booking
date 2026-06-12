@@ -96,6 +96,11 @@ ReminderScheduler                         (scheduler.py)
 | `SHORTENER_URL` | Yes | - | Base URL of Shortify service |
 | `SHORTENER_API_KEY` | No | - | Shortify API key (optional) |
 | `IS_ENABLE_BOOKING_CONSTRAINTS` | No | `False` | Enable/disable constraint validation |
+| `BLACKLIST_ENABLED` | No | `True` | Master switch for the booking blacklist check |
+| `EVENT_ADMIN_API_URL` | No | - | event-admin base URL (`GET /api/blacklist/active`); unset → blacklist disabled with a startup warning, never a crash |
+| `BLACKLIST_SERVICE_TOKEN` | No | - | Static bearer token for the blacklist service endpoint (must match event-admin) |
+| `BLACKLIST_CACHE_TTL` | No | `300` | TTL (seconds) of the in-memory active blacklist cache |
+| `BLACKLIST_TIMEOUT_SECONDS` | No | `5.0` | httpx timeout for blacklist fetches |
 | `REMINDER_INTERVAL_SECONDS` | No | `300` | Scheduler polling interval |
 | `REMINDER_SHIFT_FROM_MINUTES` | No | `55` | Remind N minutes before start (min) |
 | `REMINDER_SHIFT_TO_MINUTES` | No | `65` | Remind N minutes before start (max) |

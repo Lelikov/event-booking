@@ -13,6 +13,7 @@ import structlog
 from event_schemas.types import EventType, RecipientRole, TriggerEvent
 
 from event_booking.dtos import BookingDTO, ConstraintsResult, MeetingUrls, notification_recipient
+from event_booking.interfaces.blacklist import IBlacklistChecker
 from event_booking.interfaces.chat import IChatController
 from event_booking.interfaces.constraints import IBookingConstraintsAnalyzer
 from event_booking.interfaces.db import IBookingDatabaseAdapter
@@ -29,6 +30,11 @@ _WELCOME_MESSAGE_1 = {
 _WELCOME_MESSAGE_2 = {
     "text": "Feel free to ask any questions about your upcoming session.",
 }
+
+# Client-visible everywhere (cal.com rejectionReason, notification template data):
+# never mention the blacklist itself; rejection_type='blacklisted' carries the semantics internally.
+BLACKLIST_REJECTION_REASON = "Booking was rejected. Please contact the organizer."
+BLACKLIST_REJECTION_TYPE = "blacklisted"
 
 
 def _dedupe(ce_id: str, *parts: str) -> str | None:
@@ -47,6 +53,7 @@ class BookingController:
         chat_controller: IChatController,
         meeting_controller: IMeetingController,
         constraints_analyzer: IBookingConstraintsAnalyzer,
+        blacklist_checker: IBlacklistChecker,
         is_enable_constraints: bool = False,
     ) -> None:
         self._db = db
@@ -54,6 +61,7 @@ class BookingController:
         self._chat = chat_controller
         self._meeting = meeting_controller
         self._constraints = constraints_analyzer
+        self._blacklist = blacklist_checker
         self._is_enable_constraints = is_enable_constraints
 
     async def handle_created(self, booking_uid: str, *, ce_id: str = "") -> None:
@@ -63,6 +71,21 @@ class BookingController:
             logger.warning("handle_created: booking not found", booking_uid=booking_uid)
             return
 
+        if booking.client and await self._blacklist.is_blacklisted(booking.client.email):
+            logger.info("handle_created: client is blacklisted, rejecting", booking_uid=booking.uid)
+            result = ConstraintsResult(
+                is_allowed=False,
+                rejection_reasons=[BLACKLIST_REJECTION_REASON],
+                rejection_type=BLACKLIST_REJECTION_TYPE,
+            )
+            await self._reject_booking(
+                booking,
+                result,
+                trigger_event=TriggerEvent.BOOKING_REJECTED_BLACKLISTED,
+                ce_id=ce_id,
+            )
+            return
+
         if self._is_enable_constraints and booking.client:
             attendee_bookings = await self._db.get_attendee_bookings_by_email(
                 email=booking.client.email,
@@ -70,14 +93,7 @@ class BookingController:
             )
             result = self._constraints.analyze_on_create(booking=booking, attendee_bookings=attendee_bookings)
             if not result.is_allowed:
-                await self._db.reject_booking(booking_id=booking.id, reason="; ".join(result.rejection_reasons))
-                await self._send_rejection_notification(booking, result, ce_id=ce_id)
-                await self._events.send_event(
-                    booking_uid=booking.uid,
-                    event=EventType.BOOKING_REJECTED,
-                    data=self._build_rejected_payload(booking, result),
-                    dedupe_key=_dedupe(ce_id, EventType.BOOKING_REJECTED.value),
-                )
+                await self._reject_booking(booking, result, trigger_event=TriggerEvent.BOOKING_REJECTED, ce_id=ce_id)
                 return
 
         await self._ensure_chat_with_welcome(booking, ce_id=ce_id)
@@ -292,11 +308,30 @@ class BookingController:
             payload["active_booking_start"] = result.active_booking_start.isoformat()
         return payload
 
+    async def _reject_booking(
+        self,
+        booking: BookingDTO,
+        result: ConstraintsResult,
+        *,
+        trigger_event: TriggerEvent,
+        ce_id: str,
+    ) -> None:
+        """Shared rejection flow: cal.com status update, notification command, booking.rejected event."""
+        await self._db.reject_booking(booking_id=booking.id, reason="; ".join(result.rejection_reasons))
+        await self._send_rejection_notification(booking, result, trigger_event=trigger_event, ce_id=ce_id)
+        await self._events.send_event(
+            booking_uid=booking.uid,
+            event=EventType.BOOKING_REJECTED,
+            data=self._build_rejected_payload(booking, result),
+            dedupe_key=_dedupe(ce_id, EventType.BOOKING_REJECTED.value),
+        )
+
     async def _send_rejection_notification(
         self,
         booking: BookingDTO,
         result: ConstraintsResult,
         *,
+        trigger_event: TriggerEvent,
         ce_id: str,
     ) -> None:
         """Send rejection notification command with constraint details."""
@@ -318,10 +353,10 @@ class BookingController:
 
         await self._events.send_notification_command(
             booking_uid=booking.uid,
-            trigger_event=TriggerEvent.BOOKING_REJECTED.value,
+            trigger_event=trigger_event.value,
             recipients=recipients,
             template_data=template_data,
-            dedupe_key=_dedupe(ce_id, "notification", TriggerEvent.BOOKING_REJECTED.value, "client"),
+            dedupe_key=_dedupe(ce_id, "notification", trigger_event.value, "client"),
         )
 
     @staticmethod

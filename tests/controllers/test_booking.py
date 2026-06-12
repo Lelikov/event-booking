@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from event_schemas.types import EventType
 
-from event_booking.controllers.booking import CLIENT_PREFIX, BookingController
+from event_booking.controllers.booking import BLACKLIST_REJECTION_REASON, CLIENT_PREFIX, BookingController
 from event_booking.dtos import ConstraintsResult
 from tests.factories import make_booking, make_client, make_user
 
@@ -16,14 +16,20 @@ def make_controller(  # noqa: PLR0913
     mock_chat_controller: AsyncMock,
     mock_meeting_controller: AsyncMock,
     mock_constraints_analyzer: MagicMock,
+    mock_blacklist_checker: AsyncMock | None = None,
     is_enable_constraints: bool = False,
 ) -> BookingController:
+    blacklist_checker = mock_blacklist_checker
+    if blacklist_checker is None:
+        blacklist_checker = AsyncMock()
+        blacklist_checker.is_blacklisted = AsyncMock(return_value=False)
     return BookingController(
         db=mock_db,
         events=mock_events,
         chat_controller=mock_chat_controller,
         meeting_controller=mock_meeting_controller,
         constraints_analyzer=mock_constraints_analyzer,
+        blacklist_checker=blacklist_checker,
         is_enable_constraints=is_enable_constraints,
     )
 
@@ -259,6 +265,85 @@ class TestHandleCreated:
 
         mock_chat_controller.create_chat.assert_not_called()
         mock_meeting_controller.create_meeting_url.assert_not_called()
+
+    async def test_rejects_blacklisted_client_before_constraints(  # noqa: PLR0913
+        self,
+        mock_db: AsyncMock,
+        mock_events: AsyncMock,
+        mock_chat_controller: AsyncMock,
+        mock_meeting_controller: AsyncMock,
+        mock_constraints_analyzer: MagicMock,
+        mock_blacklist_checker: AsyncMock,
+    ) -> None:
+        booking = make_booking()
+        mock_db.get_booking = AsyncMock(return_value=booking)
+        mock_blacklist_checker.is_blacklisted = AsyncMock(return_value=True)
+
+        controller = make_controller(
+            mock_db=mock_db,
+            mock_events=mock_events,
+            mock_chat_controller=mock_chat_controller,
+            mock_meeting_controller=mock_meeting_controller,
+            mock_constraints_analyzer=mock_constraints_analyzer,
+            mock_blacklist_checker=mock_blacklist_checker,
+            is_enable_constraints=True,
+        )
+
+        await controller.handle_created(booking.uid, ce_id="ce-1")
+
+        mock_blacklist_checker.is_blacklisted.assert_called_once_with(booking.client.email)
+        # Blacklist runs BEFORE analyze_on_create.
+        mock_constraints_analyzer.analyze_on_create.assert_not_called()
+        mock_db.get_attendee_bookings_by_email.assert_not_called()
+
+        mock_db.reject_booking.assert_called_once_with(
+            booking_id=booking.id,
+            reason=BLACKLIST_REJECTION_REASON,
+        )
+
+        mock_events.send_notification_command.assert_called_once()
+        notif_kwargs = mock_events.send_notification_command.call_args.kwargs
+        assert notif_kwargs["trigger_event"] == "BOOKING_REJECTED_BLACKLISTED"
+        assert notif_kwargs["recipients"] == [{"email": booking.client.email, "role": "client"}]
+        # Client-facing data never mentions the blacklist itself.
+        assert "blacklist" not in str(notif_kwargs["template_data"]["rejection_reasons"]).lower()
+
+        mock_events.send_event.assert_called_once()
+        event_kwargs = mock_events.send_event.call_args.kwargs
+        assert event_kwargs["event"] == EventType.BOOKING_REJECTED
+        assert event_kwargs["data"]["rejection_type"] == "blacklisted"
+        assert event_kwargs["data"]["client_email"] == booking.client.email
+
+        mock_chat_controller.create_chat.assert_not_called()
+        mock_meeting_controller.create_meeting_url.assert_not_called()
+
+    async def test_non_blacklisted_client_proceeds_normally(  # noqa: PLR0913
+        self,
+        mock_db: AsyncMock,
+        mock_events: AsyncMock,
+        mock_chat_controller: AsyncMock,
+        mock_meeting_controller: AsyncMock,
+        mock_constraints_analyzer: MagicMock,
+        mock_blacklist_checker: AsyncMock,
+    ) -> None:
+        booking = make_booking()
+        mock_db.get_booking = AsyncMock(return_value=booking)
+        mock_chat_controller.has_messages = AsyncMock(return_value=False)
+
+        controller = make_controller(
+            mock_db=mock_db,
+            mock_events=mock_events,
+            mock_chat_controller=mock_chat_controller,
+            mock_meeting_controller=mock_meeting_controller,
+            mock_constraints_analyzer=mock_constraints_analyzer,
+            mock_blacklist_checker=mock_blacklist_checker,
+        )
+
+        await controller.handle_created(booking.uid, ce_id="ce-1")
+
+        mock_blacklist_checker.is_blacklisted.assert_called_once_with(booking.client.email)
+        mock_db.reject_booking.assert_not_called()
+        mock_chat_controller.create_chat.assert_called_once()
 
     async def test_returns_early_when_booking_not_found(
         self,

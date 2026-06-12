@@ -79,6 +79,26 @@ Reference: `config.py:26-30`, `adapters/events.py:1-60`, `ioc.py`
 
 ---
 
+### event-admin (HTTP service, optional)
+
+| Property | Value |
+|----------|-------|
+| Role | Source of the booking blacklist (currently-effective `client_email` values) |
+| Protocol | HTTP REST |
+| Endpoint | `GET /api/blacklist/active?field=client_email` |
+| Auth | `Authorization: Bearer {BLACKLIST_SERVICE_TOKEN}` (static service token, constant-time compared by event-admin) |
+| Config | `EVENT_ADMIN_API_URL`, `BLACKLIST_SERVICE_TOKEN`, `BLACKLIST_CACHE_TTL` (default 300 s), `BLACKLIST_TIMEOUT_SECONDS` (default 5 s), `BLACKLIST_ENABLED` (default true) |
+| Client | httpx `AsyncClient` per refresh; APP-scoped in-memory TTL cache |
+
+**Failure modes:**
+- **Config absent (`EVENT_ADMIN_API_URL`/`BLACKLIST_SERVICE_TOKEN` unset):** blacklist disabled with a startup warning; booking keeps working in deployments without event-admin.
+- **Refresh fails with cache present:** stale cache keeps serving (warning logged).
+- **API down with no cache:** **fail-open** — emails treated as not blacklisted, error logged. The blacklist never blocks booking processing.
+
+Reference: `adapters/blacklist.py`, `ioc.py` (`get_blacklist_checker`)
+
+---
+
 ### GetStream Chat API
 
 | Property | Value |

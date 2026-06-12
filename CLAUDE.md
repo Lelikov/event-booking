@@ -49,6 +49,7 @@ consumer.py BookingConsumer ── ce-bookingid + ce id (dedupe seed)
         ▼
 controllers/booking.py BookingController        (REQUEST scope, one per message)
    ├── controllers/constraints.py  pure analyzer (booking.created only)
+   ├── adapters/blacklist.py      BlacklistClient → event-admin /api/blacklist/active (TTL cache, fail-open)
    ├── controllers/chat.py     ChatController → adapters/get_stream.py (to_thread)
    ├── controllers/meeting.py  Jitsi JWT + adapters/shortener.py (Shortify)
    ├── adapters/db.py          cal.com PostgreSQL (raw SQL via SqlExecutor)
@@ -76,7 +77,7 @@ resumes without duplicates. `EventPublisher` raises `EventPublishError` on non-2
 
 | Event | Behavior |
 |---|---|
-| `booking.created` | optional constraints (reject → cal.com `status='rejected'` + `booking.rejected`), chat + welcomes, per-participant URLs, client URL → `metadata.videoCallUrl`, per-recipient notifications |
+| `booking.created` | blacklist check FIRST (match → reject with `rejection_type='blacklisted'` + `BOOKING_REJECTED_BLACKLISTED` notification), then optional constraints (reject → cal.com `status='rejected'` + `booking.rejected`), chat + welcomes, per-participant URLs, client URL → `metadata.videoCallUrl`, per-recipient notifications |
 | `booking.rescheduled` | new uid; delete OLD uid's chat (`previous_booking_uid` payload, fallback `fromReschedule`), recreate chat, MOVE short URLs to new uid, notify with URLs |
 | `booking.reassigned` | HARD-delete channel (soft-deleted ids can't be recreated), recreate, regenerate URLs in place, notify |
 | `booking.cancelled` | notify, delete chat + both short URLs |
