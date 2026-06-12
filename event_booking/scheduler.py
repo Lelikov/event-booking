@@ -7,6 +7,7 @@ import structlog
 from dishka import AsyncContainer
 from event_schemas.types import EventType, TriggerEvent
 
+from event_booking import metrics
 from event_booking.adapters.db import BookingDatabaseAdapter
 from event_booking.dtos import BookingDTO, notification_recipient
 from event_booking.interfaces.events import IEventPublisher
@@ -60,6 +61,7 @@ class ReminderScheduler:
         for booking in bookings:
             await self._send_reminder(booking)
             await db.mark_reminder_sent(booking.uid, sent_at=now)
+            metrics.REMINDERS_SENT_TOTAL.inc()
             count += 1
 
         if count:

@@ -35,6 +35,28 @@ This service has a minimal HTTP API:
 
 ---
 
+### `GET /metrics`
+
+**Purpose:** Prometheus exposition endpoint (`prometheus_client.generate_latest`).
+
+**Response (200 OK):** `text/plain; version=0.0.4; charset=utf-8`
+
+**Implementation:** `main.py`, `metrics.py`
+
+**Exposed metrics:**
+
+| Metric | Type | Labels |
+|---|---|---|
+| `messages_processed_total` | counter | `queue`, `event_type` (`unknown` for unparseable), `outcome` (ok/retried/rejected; unhandled types are acked as `ok`, dispatch failures dead-letter as `rejected`) |
+| `message_processing_seconds` | histogram | `queue` |
+| `booking_rejections_total` | counter | `rejection_type` (constraints types, `blacklisted`) |
+| `booking_blacklist_checks_total` | counter | `result` (hit/miss/fail_open) |
+| `booking_chats_created_total` | counter | — |
+| `booking_meeting_urls_created_total` | counter | `role` (organizer/client) |
+| `booking_reminders_sent_total` | counter | — |
+
+---
+
 ## RabbitMQ Consumed
 
 ### Queue

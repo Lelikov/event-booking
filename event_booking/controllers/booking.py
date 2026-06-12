@@ -12,6 +12,7 @@ flow stopped without duplicating side effects.
 import structlog
 from event_schemas.types import EventType, RecipientRole, TriggerEvent
 
+from event_booking import metrics
 from event_booking.dtos import BookingDTO, ConstraintsResult, MeetingUrls, notification_recipient
 from event_booking.interfaces.blacklist import IBlacklistChecker
 from event_booking.interfaces.chat import IChatController
@@ -317,6 +318,7 @@ class BookingController:
         ce_id: str,
     ) -> None:
         """Shared rejection flow: cal.com status update, notification command, booking.rejected event."""
+        metrics.REJECTIONS_TOTAL.labels(rejection_type=result.rejection_type or "unknown").inc()
         await self._db.reject_booking(booking_id=booking.id, reason="; ".join(result.rejection_reasons))
         await self._send_rejection_notification(booking, result, trigger_event=trigger_event, ce_id=ce_id)
         await self._events.send_event(

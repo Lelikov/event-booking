@@ -1,6 +1,7 @@
 """RabbitMQ consumer: parses CloudEvents and dispatches to BookingController."""
 
 import json
+from time import perf_counter
 
 import structlog
 from cloudevents.core.bindings.http import HTTPMessage, from_http
@@ -12,6 +13,7 @@ from event_schemas.queues import EVENTS_DLX, QueueSpec
 from event_schemas.types import EventType
 from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange, RabbitMessage, RabbitQueue
 
+from event_booking import metrics
 from event_booking.controllers.booking import BookingController
 
 logger = structlog.get_logger(__name__)
@@ -98,6 +100,7 @@ class BookingConsumer:
 
         @broker.subscriber(queue, exchange)
         async def handle_message(msg: RabbitMessage) -> None:
+            started_at = perf_counter()
             headers: dict[str, str] = {k: v for k, v in (msg.headers or {}).items() if isinstance(v, str)}
             body: bytes = msg.body if isinstance(msg.body, bytes) else json.dumps(msg.body).encode()
 
@@ -105,6 +108,12 @@ class BookingConsumer:
                 http_msg = HTTPMessage(headers=headers, body=body)
                 cloud_event = from_http(http_msg, JSONFormat())
             except Exception:
+                metrics.record_message(
+                    queue=queue_spec.name,
+                    event_type="unknown",
+                    outcome="rejected",
+                    started_at=started_at,
+                )
                 logger.exception("Failed to parse CloudEvent", headers=headers)
                 return
 
@@ -113,14 +122,36 @@ class BookingConsumer:
             data: dict = extract_event_data(cloud_event)
 
             if event_type not in HANDLED_EVENTS:
+                metrics.record_message(
+                    queue=queue_spec.name,
+                    event_type=event_type,
+                    outcome="ok",
+                    started_at=started_at,
+                )
                 logger.warning("Unhandled event type, skipping", event_type=event_type)
                 return
 
             ce_id: str = cloud_event.get_attributes().get("id") or ""
             logger.info("Dispatching event", event_type=event_type, booking_uid=booking_uid, ce_id=ce_id)
-            async with self._container() as request_container:
-                controller = await request_container.get(BookingController)
-                await self.dispatch(controller, event_type, booking_uid, data, ce_id)
+            try:
+                async with self._container() as request_container:
+                    controller = await request_container.get(BookingController)
+                    await self.dispatch(controller, event_type, booking_uid, data, ce_id)
+            except Exception:
+                # The raised error dead-letters the message (queue DLX arguments).
+                metrics.record_message(
+                    queue=queue_spec.name,
+                    event_type=event_type,
+                    outcome="rejected",
+                    started_at=started_at,
+                )
+                raise
+            metrics.record_message(
+                queue=queue_spec.name,
+                event_type=event_type,
+                outcome="ok",
+                started_at=started_at,
+            )
 
 
 async def ensure_dead_letter_topology(broker: RabbitBroker, queue_spec: QueueSpec) -> None:

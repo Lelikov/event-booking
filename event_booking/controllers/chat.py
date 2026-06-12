@@ -8,6 +8,7 @@ which makes redelivery a safe resume instead of a duplicate side effect.
 import structlog
 from event_schemas.types import EventType
 
+from event_booking import metrics
 from event_booking.interfaces.chat import IChatClient
 from event_booking.interfaces.events import IEventPublisher
 
@@ -27,6 +28,7 @@ class ChatController:
             organizer_id=organizer_id,
             client_id=client_id,
         )
+        metrics.CHATS_CREATED_TOTAL.inc()
         await self._events.send_event(
             booking_uid=channel_id,
             event=EventType.CHAT_CREATED,

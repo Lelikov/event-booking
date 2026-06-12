@@ -18,6 +18,7 @@ dependencies = [
     "stream-chat>=4.29.0",
     "structlog>=25.5.0",
     "uvicorn>=0.41.0",
+    "prometheus-client>=0.25.0",
 ]
 
 [project.optional-dependencies]

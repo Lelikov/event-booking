@@ -12,6 +12,7 @@ import jwt
 import structlog
 from event_schemas.types import EventType
 
+from event_booking import metrics
 from event_booking.dtos import BookingDTO
 from event_booking.interfaces.chat import IChatClient
 from event_booking.interfaces.events import IEventPublisher
@@ -158,6 +159,7 @@ class MeetingController:
             old_external_id=old_external_id,
         )
 
+        metrics.MEETING_URLS_CREATED_TOTAL.labels(role=role).inc()
         # Canonical MeetingUrlCreatedPayload: {email, recipient_role, meeting_url}
         await self._events.send_event(
             booking_uid=booking.uid,

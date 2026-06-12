@@ -17,6 +17,8 @@ from collections.abc import Callable
 import httpx
 import structlog
 
+from event_booking import metrics
+
 logger = structlog.get_logger(__name__)
 
 _ACTIVE_PATH = "/api/blacklist/active"
@@ -55,8 +57,13 @@ class BlacklistClient:
             return False
         values = await self._get_values()
         if values is None:
+            metrics.BLACKLIST_CHECKS_TOTAL.labels(result="fail_open").inc()
             return False
-        return email.strip().lower() in values
+        if email.strip().lower() in values:
+            metrics.BLACKLIST_CHECKS_TOTAL.labels(result="hit").inc()
+            return True
+        metrics.BLACKLIST_CHECKS_TOTAL.labels(result="miss").inc()
+        return False
 
     async def _get_values(self) -> frozenset[str] | None:
         now = self._clock()

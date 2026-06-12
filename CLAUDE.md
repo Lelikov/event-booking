@@ -61,6 +61,7 @@ scheduler.py ReminderScheduler — polls cal.com, persistent bookingReminderSent
 - **Interfaces** (`interfaces/`): Protocols (`IBookingDatabaseAdapter`, `IChatClient`,
   `IChatController`, `IMeetingController`, `IEventPublisher`, `IUrlShortener`, `ISqlExecutor`).
 - **DTOs** (`dtos.py`): frozen dataclasses only.
+- **Metrics** (`metrics.py`): Prometheus consumer RED (`messages_processed_total{queue,event_type,outcome}`, `message_processing_seconds{queue}`) + business counters (`booking_rejections_total{rejection_type}`, `booking_blacklist_checks_total{result}`, `booking_chats_created_total`, `booking_meeting_urls_created_total{role}`, `booking_reminders_sent_total`); exposed at `GET /metrics` on the health HTTP app.
 - **DI** (`ioc.py`): APP scope for stateless adapters/controllers; REQUEST scope for
   `AsyncSession` → `SqlExecutor` → db adapter → `BookingController`. One REQUEST scope per
   RabbitMQ message / scheduler tick.

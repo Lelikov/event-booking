@@ -8,11 +8,12 @@ import structlog
 from dishka import AsyncContainer, make_async_container
 from event_schemas.queues import BOOKING_LIFECYCLE_BOOKING_QUEUE
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from faststream.rabbit import RabbitBroker, RabbitExchange
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from event_booking import metrics
 from event_booking.config import Settings
 from event_booking.consumer import BookingConsumer, ensure_dead_letter_topology
 from event_booking.ioc import AppProvider
@@ -92,6 +93,12 @@ async def _check_rabbit(container: AsyncContainer) -> bool:
 async def health() -> dict[str, str]:
     """Liveness probe: the process is up and serving HTTP. No dependency calls."""
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics_endpoint() -> Response:
+    """Prometheus exposition endpoint (consumer RED + business counters)."""
+    return metrics.metrics_response()
 
 
 @app.get("/ready")
