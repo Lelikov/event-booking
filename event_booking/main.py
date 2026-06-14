@@ -19,6 +19,7 @@ from event_booking.consumer import BookingConsumer, ensure_dead_letter_topology
 from event_booking.ioc import AppProvider
 from event_booking.logger import setup_logging
 from event_booking.scheduler import ReminderScheduler
+from event_booking.telemetry import instrument_asyncpg, instrument_fastapi, setup_tracing
 
 logger = structlog.get_logger(__name__)
 
@@ -62,6 +63,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="event-booking", lifespan=lifespan)
+setup_tracing()
+instrument_fastapi(app)
+instrument_asyncpg()
 
 READY_CHECK_TIMEOUT_SECONDS = 5.0
 READY_CHECK_QUERY = "select 1"

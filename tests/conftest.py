@@ -1,5 +1,9 @@
 """Shared pytest fixtures for event-booking tests."""
 
+import os
+
+os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

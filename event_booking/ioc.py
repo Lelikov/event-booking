@@ -33,6 +33,7 @@ from event_booking.dtos import AttendeeBookingDTO, BookingDTO, ConstraintsResult
 from event_booking.interfaces.blacklist import IBlacklistChecker
 from event_booking.interfaces.constraints import IBookingConstraintsAnalyzer
 from event_booking.scheduler import ReminderScheduler
+from event_booking.telemetry import rabbit_telemetry_middlewares
 
 logger = structlog.get_logger(__name__)
 
@@ -100,7 +101,11 @@ class AppProvider(Provider):
 
     @provide
     def get_rabbit_broker(self, settings: Settings) -> RabbitBroker:
-        return RabbitBroker(str(settings.rabbit_url), graceful_timeout=BROKER_GRACEFUL_TIMEOUT_SECONDS)
+        return RabbitBroker(
+            str(settings.rabbit_url),
+            graceful_timeout=BROKER_GRACEFUL_TIMEOUT_SECONDS,
+            middlewares=[*rabbit_telemetry_middlewares()],
+        )
 
     @provide
     def get_rabbit_exchange(self, settings: Settings) -> RabbitExchange:
