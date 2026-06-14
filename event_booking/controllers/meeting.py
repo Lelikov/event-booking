@@ -11,6 +11,7 @@ from typing import Any
 import jwt
 import structlog
 from event_schemas.types import EventType
+from opentelemetry import trace
 
 from event_booking import metrics
 from event_booking.dtos import BookingDTO
@@ -19,6 +20,8 @@ from event_booking.interfaces.events import IEventPublisher
 from event_booking.interfaces.shortener import IUrlShortener
 
 logger = structlog.get_logger(__name__)
+
+_tracer = trace.get_tracer(__name__)
 
 BUFFER_MINUTES = 5
 ORGANIZER_ROLE = "organizer"
@@ -139,25 +142,29 @@ class MeetingController:
           same external id.
         """
         role = CLIENT_ROLE if external_id_prefix else ORGANIZER_ROLE
-        long_url = await self._generate_long_url(booking, participant_name, participant_email, role)
 
-        not_before = self._get_not_before(booking.start_time)
-        expires_at = self._get_expiration(booking.end_time)
-        external_id = f"{external_id_prefix}{booking.uid}"
+        with _tracer.start_as_current_span("booking.meeting_url_mint") as span:
+            span.set_attribute("booking.uid", booking.uid)
+            span.set_attribute("recipient.role", role)
+            long_url = await self._generate_long_url(booking, participant_name, participant_email, role)
 
-        old_external_id: str | None = None
-        if previous_booking_uid:
-            old_external_id = f"{external_id_prefix}{previous_booking_uid}"
-        if replace_existing:
-            old_external_id = external_id
+            not_before = self._get_not_before(booking.start_time)
+            expires_at = self._get_expiration(booking.end_time)
+            external_id = f"{external_id_prefix}{booking.uid}"
 
-        short_url = await self._resolve_short_url(
-            long_url=long_url,
-            expires_at=expires_at,
-            not_before=not_before,
-            external_id=external_id,
-            old_external_id=old_external_id,
-        )
+            old_external_id: str | None = None
+            if previous_booking_uid:
+                old_external_id = f"{external_id_prefix}{previous_booking_uid}"
+            if replace_existing:
+                old_external_id = external_id
+
+            short_url = await self._resolve_short_url(
+                long_url=long_url,
+                expires_at=expires_at,
+                not_before=not_before,
+                external_id=external_id,
+                old_external_id=old_external_id,
+            )
 
         metrics.MEETING_URLS_CREATED_TOTAL.labels(role=role).inc()
         # Canonical MeetingUrlCreatedPayload: {email, recipient_role, meeting_url}

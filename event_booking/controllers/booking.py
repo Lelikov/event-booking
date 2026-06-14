@@ -11,6 +11,7 @@ flow stopped without duplicating side effects.
 
 import structlog
 from event_schemas.types import EventType, RecipientRole, TriggerEvent
+from opentelemetry import trace
 
 from event_booking import metrics
 from event_booking.dtos import BookingDTO, ConstraintsResult, MeetingUrls, notification_recipient
@@ -22,6 +23,8 @@ from event_booking.interfaces.events import IEventPublisher
 from event_booking.interfaces.meeting import IMeetingController
 
 logger = structlog.get_logger(__name__)
+
+_tracer = trace.get_tracer(__name__)
 
 CLIENT_PREFIX = "client_"
 
@@ -72,7 +75,10 @@ class BookingController:
             logger.warning("handle_created: booking not found", booking_uid=booking_uid)
             return
 
-        if booking.client and await self._blacklist.is_blacklisted(booking.client.email):
+        with _tracer.start_as_current_span("booking.blacklist_check") as span:
+            span.set_attribute("booking.uid", booking_uid)
+            is_blacklisted = booking.client and await self._blacklist.is_blacklisted(booking.client.email)
+        if is_blacklisted:
             logger.info("handle_created: client is blacklisted, rejecting", booking_uid=booking.uid)
             result = ConstraintsResult(
                 is_allowed=False,

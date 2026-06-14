@@ -20,8 +20,11 @@ from cloudevents.core.bindings.http import to_binary
 from cloudevents.core.formats.json import JSONFormat
 from cloudevents.core.v1.event import CloudEvent
 from event_schemas.types import EventType
+from opentelemetry import trace
 
 logger = structlog.get_logger(__name__)
+
+_tracer = trace.get_tracer(__name__)
 
 # Fixed namespace for deterministic event ids (do not change: breaks dedupe on rolling deploys).
 _EVENT_ID_NAMESPACE = uuid.UUID("9b1dab2e-5c3f-4f24-9f6a-1a2b3c4d5e6f")
@@ -62,30 +65,33 @@ class EventPublisher:
         *,
         dedupe_key: str | None = None,
     ) -> None:
-        payload = {"booking_uid": booking_uid, **(data or {})}
-        ce = CloudEvent(
-            {
-                "type": event.value,
-                "source": self._source,
-                "id": _event_id(dedupe_key),
-                "time": datetime.now(UTC),
-                "specversion": "1.0",
-            },
-            json.dumps(payload).encode(),
-        )
-        message = to_binary(ce, JSONFormat())
-        headers = dict(message.headers)
-        headers["content-type"] = "application/json"
-        if self._api_key:
-            headers["Authorization"] = self._api_key
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-                response = await client.post(self._endpoint_url, headers=headers, content=message.body)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            logger.exception("Failed to send event", event_type=event.value, booking_uid=booking_uid)
-            msg = f"event-receiver rejected {event.value} for booking {booking_uid}: {exc}"
-            raise EventPublishError(msg) from exc
+        with _tracer.start_as_current_span("booking.publish_followup") as span:
+            span.set_attribute("booking.uid", booking_uid)
+            span.set_attribute("event.type", event.value)
+            payload = {"booking_uid": booking_uid, **(data or {})}
+            ce = CloudEvent(
+                {
+                    "type": event.value,
+                    "source": self._source,
+                    "id": _event_id(dedupe_key),
+                    "time": datetime.now(UTC),
+                    "specversion": "1.0",
+                },
+                json.dumps(payload).encode(),
+            )
+            message = to_binary(ce, JSONFormat())
+            headers = dict(message.headers)
+            headers["content-type"] = "application/json"
+            if self._api_key:
+                headers["Authorization"] = self._api_key
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+                    response = await client.post(self._endpoint_url, headers=headers, content=message.body)
+                    response.raise_for_status()
+            except httpx.HTTPError as exc:
+                logger.exception("Failed to send event", event_type=event.value, booking_uid=booking_uid)
+                msg = f"event-receiver rejected {event.value} for booking {booking_uid}: {exc}"
+                raise EventPublishError(msg) from exc
         logger.info("Event sent", event_type=event.value, booking_uid=booking_uid)
 
     async def send_notification_command(
