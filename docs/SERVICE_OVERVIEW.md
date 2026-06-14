@@ -245,6 +245,10 @@ from the inbound CloudEvent id. Any failure propagates -> the message is rejecte
 and dead-letters to `events.booking.lifecycle.booking.dlq` (24h TTL) -> a DLQ
 replay resumes exactly where the flow stopped without duplicating side effects.
 
+## Tracing
+
+OpenTelemetry auto-instrumentation (FastAPI, httpx, asyncpg, RabbitMQ via FastStream middleware) + manual spans: `booking.blacklist_check` (attribute: `booking.uid`), `booking.chat_create`, `booking.meeting_url_mint` (attribute: recipient role), `booking.publish_followup`; exported via OTLP/gRPC to the collector → Tempo; gated by `OTEL_SDK_DISABLED` (off by default).
+
 ## Known Limitations and Gaps
 
 | Severity | Issue | Location | Status |
