@@ -19,9 +19,11 @@ MEETING_HOST_URL = "https://meet.test"
 
 @pytest.fixture
 def booking():
-    now = datetime(2026, 6, 15, 10, 0, tzinfo=UTC)
+    # Use a time relative to "now" so the Jitsi JWT exp (derived from end_time)
+    # is always in the future and the tests stay date-independent.
+    now = datetime.now(UTC) + timedelta(hours=1)
     return BookingDTO(
-        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+        created_at=datetime.now(UTC) - timedelta(days=14),
         end_time=now + timedelta(hours=1),
         id=1,
         start_time=now,
