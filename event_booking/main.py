@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager, suppress
 
 import structlog
 from dishka import AsyncContainer, make_async_container
-from event_schemas.queues import BOOKING_LIFECYCLE_BOOKING_QUEUE
+from event_schemas.queues import BOOKING_LIFECYCLE_BOOKING_QUEUE, USER_EMAIL_BOOKING_QUEUE
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from faststream.rabbit import RabbitBroker, RabbitExchange
@@ -43,6 +43,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("RabbitMQ broker started", queue=BOOKING_LIFECYCLE_BOOKING_QUEUE.name)
 
     await ensure_dead_letter_topology(broker, BOOKING_LIFECYCLE_BOOKING_QUEUE)
+
+    consumer.register_user_email(broker, exchange, USER_EMAIL_BOOKING_QUEUE)
+    await ensure_dead_letter_topology(broker, USER_EMAIL_BOOKING_QUEUE)
 
     scheduler_task = asyncio.create_task(scheduler.run_forever())
     logger.info("Reminder scheduler started")

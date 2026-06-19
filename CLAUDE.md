@@ -17,6 +17,9 @@ follow-up CloudEvents back through event-receiver over HTTP.
 - **cal.com owns its schema.** This service NEVER creates migrations and NEVER `DELETE`s cal.com
   rows. Allowed writes: `Booking.status`/`rejectionReason` updates and `Booking.metadata` merges
   (`videoCallUrl`, `bookingReminderSentAt`).
+- `UPDATE "Attendee".email` — разрешено ТОЛЬКО для проброса смены email клиента из админки
+  (событие user.email.change_requested с booking_uid). Выполняется с `SET LOCAL app.sync_suppress='on'`,
+  чтобы не зациклить триггер event-db-sync. Никаких других записей в "Attendee".
 - cal.com timestamps are `timestamp(3) without time zone` (naive UTC). `adapters/db.py` is the
   timezone boundary: rows leave as aware UTC, bind params are converted back to naive UTC.
   Never compare naive and aware datetimes elsewhere.
