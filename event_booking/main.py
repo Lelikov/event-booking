@@ -38,13 +38,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     scheduler = await container.get(ReminderScheduler)
 
     consumer.register(broker, exchange, BOOKING_LIFECYCLE_BOOKING_QUEUE)
+    consumer.register_user_email(broker, exchange, USER_EMAIL_BOOKING_QUEUE)
 
     await broker.start()
     logger.info("RabbitMQ broker started", queue=BOOKING_LIFECYCLE_BOOKING_QUEUE.name)
 
     await ensure_dead_letter_topology(broker, BOOKING_LIFECYCLE_BOOKING_QUEUE)
-
-    consumer.register_user_email(broker, exchange, USER_EMAIL_BOOKING_QUEUE)
     await ensure_dead_letter_topology(broker, USER_EMAIL_BOOKING_QUEUE)
 
     scheduler_task = asyncio.create_task(scheduler.run_forever())
