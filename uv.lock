@@ -488,7 +488,7 @@ requires-dist = [
     { name = "cloudevents", specifier = ">=2.0.0" },
     { name = "cryptography", specifier = ">=46.0.1" },
     { name = "dishka", specifier = ">=1.8.0" },
-    { name = "event-schemas", editable = "../event-schemas" },
+    { name = "event-schemas", git = "https://github.com/Lelikov/event-schemas.git?tag=v0.5.0" },
     { name = "fastapi", specifier = ">=0.135.1" },
     { name = "faststream", extras = ["rabbit"], specifier = ">=0.6.7" },
     { name = "httpx", specifier = ">=0.28.0" },
@@ -521,23 +521,9 @@ dev = [
 [[package]]
 name = "event-schemas"
 version = "0.5.0"
-source = { editable = "../event-schemas" }
+source = { git = "https://github.com/Lelikov/event-schemas.git?tag=v0.5.0#4e9c2d7255302e284a7bd87902026474ce661394" }
 dependencies = [
     { name = "pydantic", extra = ["email"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0" },
-    { name = "pydantic", extras = ["email"], specifier = ">=2.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
-]
-provides-extras = ["dev"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "code-review-graph", specifier = ">=2.3.1" },
-    { name = "pytest", specifier = ">=8.0" },
 ]
 
 [[package]]
