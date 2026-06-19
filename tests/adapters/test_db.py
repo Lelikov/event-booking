@@ -30,6 +30,9 @@ class FakeExecutor:
     async def execute(self, query: str, values: dict) -> None:
         self.calls.append((query, values))
 
+    async def execute_in_transaction(self, statements: list[tuple[str, dict]]) -> None:
+        self.calls.append(("__tx__", statements))
+
 
 class TestNormalizeEmail:
     def test_strips_and_lowercases(self) -> None:
@@ -252,3 +255,25 @@ class TestJsonbBuildObjectParamsAreCast:
             for call in re.findall(r"jsonb_build_object\(([^)]*)\)", sql):
                 uncast = re.findall(r"(?<!CAST\():\w+", call)
                 assert not uncast, f"{name}: uncast bind params {uncast} inside jsonb_build_object"
+
+
+class TestUpdateAttendeeEmail:
+    async def test_suppresses_sync_and_updates_attendee_by_booking_uid(self) -> None:
+        executor = FakeExecutor()
+        adapter = BookingDatabaseAdapter(executor)
+        await adapter.update_attendee_email(
+            booking_uid="book-123", old_email="old@example.com", new_email="new@example.com"
+        )
+        marker, statements = executor.calls[0]
+        assert marker == "__tx__"
+        suppress_sql, suppress_params = statements[0]
+        update_sql, update_params = statements[1]
+        assert "SET LOCAL app.sync_suppress = 'on'" in suppress_sql
+        assert 'UPDATE "Attendee"' in update_sql
+        assert 'FROM "Booking" WHERE uid = :booking_uid' in update_sql
+        assert "lower(email) = lower(:old_email)" in update_sql
+        assert update_params == {
+            "booking_uid": "book-123",
+            "old_email": "old@example.com",
+            "new_email": "new@example.com",
+        }

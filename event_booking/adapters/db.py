@@ -116,6 +116,15 @@ _REJECT_BOOKING_SQL = """
     WHERE id = :booking_id
 """
 
+_SUPPRESS_SYNC_SQL = "SET LOCAL app.sync_suppress = 'on'"
+
+_UPDATE_ATTENDEE_EMAIL_SQL = """
+UPDATE "Attendee"
+SET email = :new_email
+WHERE "bookingId" = (SELECT id FROM "Booking" WHERE uid = :booking_uid)
+  AND lower(email) = lower(:old_email)
+"""
+
 REMINDER_MARKER_KEY = "bookingReminderSentAt"
 
 
@@ -234,3 +243,14 @@ class BookingDatabaseAdapter:
     async def reject_booking(self, *, booking_id: int, reason: str) -> None:
         """Mark a booking rejected in cal.com (cal.com owns its rows — never DELETE)."""
         await self._executor.execute(_REJECT_BOOKING_SQL, {"booking_id": booking_id, "reason": reason})
+
+    async def update_attendee_email(self, booking_uid: str, old_email: str, new_email: str) -> None:
+        await self._executor.execute_in_transaction(
+            [
+                (_SUPPRESS_SYNC_SQL, {}),
+                (
+                    _UPDATE_ATTENDEE_EMAIL_SQL,
+                    {"booking_uid": booking_uid, "old_email": old_email, "new_email": new_email},
+                ),
+            ]
+        )
