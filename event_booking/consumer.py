@@ -14,6 +14,7 @@ from event_schemas.types import EventType
 from faststream.rabbit import ExchangeType, RabbitBroker, RabbitExchange, RabbitMessage, RabbitQueue
 
 from event_booking import metrics
+from event_booking.adapters.db import BookingDatabaseAdapter
 from event_booking.controllers.booking import BookingController
 
 logger = structlog.get_logger(__name__)
@@ -88,6 +89,89 @@ class BookingConsumer:
             return
 
         logger.warning("Unknown event type received, ignoring", event_type=event_type, booking_uid=booking_uid)
+
+    async def handle_user_email_change(self, data: dict) -> None:
+        """Propagate a user's email change to the cal.com Attendee for one booking.
+
+        ``user.email.change_requested`` fans out to ``events.user.email.booking``; only
+        events carrying a ``booking_uid`` map to a cal.com Attendee row. Without it there
+        is nothing to update here (the canonical user record lives in event-users), so the
+        message is acked as a no-op.
+        """
+        booking_uid = data.get("booking_uid")
+        if not booking_uid:
+            logger.info("user.email.change_requested without booking_uid; skipping cal.com Attendee update")
+            return
+        async with self._container() as request_container:
+            db = await request_container.get(BookingDatabaseAdapter)
+            await db.update_attendee_email(
+                booking_uid=booking_uid,
+                old_email=data["old_email"],
+                new_email=data["new_email"],
+            )
+
+    def register_user_email(self, broker: RabbitBroker, exchange: RabbitExchange, queue_spec: QueueSpec) -> None:
+        """Register the fan-out subscriber that syncs cal.com Attendee emails.
+
+        Separate from ``register``: it filters on ``user.email.change_requested`` and runs
+        its own business logic, leaving the booking-lifecycle subscriber's filter untouched.
+        """
+        queue = RabbitQueue(
+            name=queue_spec.name,
+            durable=True,
+            routing_key=str(queue_spec.binding),
+            arguments=queue_spec.arguments,
+        )
+
+        @broker.subscriber(queue, exchange)
+        async def handle_user_email_message(msg: RabbitMessage) -> None:
+            started_at = perf_counter()
+            headers: dict[str, str] = {k: v for k, v in (msg.headers or {}).items() if isinstance(v, str)}
+            body: bytes = msg.body if isinstance(msg.body, bytes) else json.dumps(msg.body).encode()
+
+            try:
+                http_msg = HTTPMessage(headers=headers, body=body)
+                cloud_event = from_http(http_msg, JSONFormat())
+            except Exception:
+                metrics.record_message(
+                    queue=queue_spec.name,
+                    event_type="unknown",
+                    outcome="rejected",
+                    started_at=started_at,
+                )
+                logger.exception("Failed to parse CloudEvent", headers=headers)
+                return
+
+            event_type: str = cloud_event.get_attributes().get("type", "")
+            data: dict = extract_event_data(cloud_event)
+
+            if event_type != EventType.USER_EMAIL_CHANGE_REQUESTED.value:
+                metrics.record_message(
+                    queue=queue_spec.name,
+                    event_type=event_type,
+                    outcome="ok",
+                    started_at=started_at,
+                )
+                logger.warning("Unhandled event type on user-email queue, skipping", event_type=event_type)
+                return
+
+            try:
+                await self.handle_user_email_change(data)
+            except Exception:
+                # The raised error dead-letters the message (queue DLX arguments).
+                metrics.record_message(
+                    queue=queue_spec.name,
+                    event_type=event_type,
+                    outcome="rejected",
+                    started_at=started_at,
+                )
+                raise
+            metrics.record_message(
+                queue=queue_spec.name,
+                event_type=event_type,
+                outcome="ok",
+                started_at=started_at,
+            )
 
     def register(self, broker: RabbitBroker, exchange: RabbitExchange, queue_spec: QueueSpec) -> None:
         """Create the canonical per-consumer queue and register subscriber on the broker."""

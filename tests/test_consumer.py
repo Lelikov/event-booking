@@ -95,6 +95,34 @@ class TestRegisterContract:
         assert BOOKING_LIFECYCLE_BOOKING_QUEUE.arguments.items() <= queue.arguments.items()
 
 
+class TestUserEmailChange:
+    async def test_updates_attendee_when_booking_uid_present(self) -> None:
+        adapter = AsyncMock()
+        consumer = BookingConsumer(FakeContainer(adapter))
+        await consumer.handle_user_email_change(
+            {"old_email": "old@x.io", "new_email": "new@x.io", "booking_uid": "book-1"}
+        )
+        adapter.update_attendee_email.assert_awaited_once_with(
+            booking_uid="book-1", old_email="old@x.io", new_email="new@x.io"
+        )
+
+    async def test_noop_without_booking_uid(self) -> None:
+        adapter = AsyncMock()
+        consumer = BookingConsumer(FakeContainer(adapter))
+        await consumer.handle_user_email_change({"old_email": "old@x.io", "new_email": "new@x.io", "booking_uid": None})
+        adapter.update_attendee_email.assert_not_awaited()
+
+    def test_register_user_email_subscribes_to_booking_queue(self) -> None:
+        from unittest.mock import MagicMock
+
+        from event_schemas.queues import USER_EMAIL_BOOKING_QUEUE
+
+        broker = MagicMock()
+        consumer = BookingConsumer(FakeContainer(MagicMock()))
+        consumer.register_user_email(broker, MagicMock(), USER_EMAIL_BOOKING_QUEUE)
+        broker.subscriber.assert_called_once()
+
+
 class TestEnvelopeUnwrap:
     def test_unwrap_payload_extracts_original_for_dispatch(self) -> None:
         from event_schemas.envelope import unwrap_payload
