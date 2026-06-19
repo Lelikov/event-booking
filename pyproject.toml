@@ -59,7 +59,7 @@ asyncio_mode = "auto"
 [tool.uv.sources]
 # Self-contained build: event-schemas is pulled from its own repo by tag.
 # For local schema work, temporarily swap to { path = "../event-schemas", editable = true }.
-event-schemas = { git = "https://github.com/Lelikov/event-schemas.git", tag = "v0.3.0" }
+event-schemas = { path = "../event-schemas", editable = true }
 
 [dependency-groups]
 dev = [
